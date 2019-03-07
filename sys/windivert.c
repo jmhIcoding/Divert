@@ -118,17 +118,19 @@ typedef struct filter_s *filter_t;
 #define WINDIVERT_FILTER_PROTOCOL_ICMPV6        4
 #define WINDIVERT_FILTER_PROTOCOL_TCP           5
 #define WINDIVERT_FILTER_PROTOCOL_UDP           6
-
+#define WINDIVERT_FILTER_PROTOCOL_ALE			7		//应用层,用于获取进程号
 /*
  * WinDivert context information.
  */
 #define WINDIVERT_CONTEXT_SIZE                  (sizeof(struct context_s))
-#define WINDIVERT_CONTEXT_MAXLAYERS             4
+#define WINDIVERT_CONTEXT_MAXLAYERS             6
 #define WINDIVERT_CONTEXT_MAXWORKERS            1
 #define WINDIVERT_CONTEXT_OUTBOUND_IPV4_LAYER   0
 #define WINDIVERT_CONTEXT_INBOUND_IPV4_LAYER    1
 #define WINDIVERT_CONTEXT_OUTBOUND_IPV6_LAYER   2
 #define WINDIVERT_CONTEXT_INBOUND_IPV6_LAYER    3
+#define WINDIVERT_CONTEXT_ASSIGN_ALE_LAYER		4
+#define WINDVIERT_CONTEXT_CLOSURE_ALE_LAYER		5
 typedef enum
 {
     WINDIVERT_CONTEXT_STATE_OPENING = 0xA0,     // Context is opening.
@@ -171,6 +173,12 @@ struct context_s
 };
 typedef struct context_s context_s;
 typedef struct context_s *context_t;
+typedef struct _ports_context_
+{
+	LIST_ENTRY list_head;
+	USHORT localport;
+} ports_context,ports_context_t;
+
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(context_s, windivert_context_get);
 
 #define WINDIVERT_TIMEOUT(context, t0, t1)                                  \
@@ -274,6 +282,10 @@ static LONG priority_counter = 0;
 static LONGLONG counts_per_ms = 0;
 static POOL_TYPE non_paged_pool = NonPagedPool;
 
+
+static LIST_ENTRY ports_list_head;
+static KSPIN_LOCK ports_list_lock;
+
 /*
  * Priorities.
  */
@@ -346,6 +358,21 @@ static void windivert_classify_forward_network_v6_callout(
     IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
     const FWPS_FILTER0 *filter, IN UINT64 flow_context,
     OUT FWPS_CLASSIFY_OUT0 *result);
+
+/*Add*/
+static void windivert_classify_assign_ale_callout(
+	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
+	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
+	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
+	OUT FWPS_CLASSIFY_OUT0 *result);
+
+static void windivert_classify_closure_ale_callout(
+	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
+	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
+	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
+	OUT FWPS_CLASSIFY_OUT0 *result);
+
+
 static void windivert_classify_callout(context_t context, IN UINT8 direction,
     IN UINT32 if_idx, IN UINT32 sub_if_idx, IN BOOL is_ipv4,
     IN BOOL loopback, IN UINT advance, IN OUT void *data,
@@ -392,6 +419,15 @@ DEFINE_GUID(WINDIVERT_SUBLAYER_FORWARD_IPV4_GUID,
 DEFINE_GUID(WINDIVERT_SUBLAYER_FORWARD_IPV6_GUID,
     0xE70D0973, 0x935F, 0x4790,
     0x8E, 0x64, 0xF7, 0xF7, 0x36, 0x27, 0xA5, 0x8F);
+
+/*Add*/
+// {AA905955-4FE2-4F3E-A0C1-08B65455CD94}
+DEFINE_GUID(WINDIVERT_SUBLAYER_ASSIGNMENT_ALE_GUID ,
+	0xaa905955, 0x4fe2, 0x4f3e, 0xa0, 0xc1, 0x8, 0xb6, 0x54, 0x55, 0xcd, 0x94);
+
+// {BFB0AE8A-CA28-4FB7-B7CD-C4A13C576D60}
+DEFINE_GUID(WINDIVERT_SUBLAYER_CLOSURE_ALE_GUID,
+	0xbfb0ae8a, 0xca28, 0x4fb7, 0xb7, 0xcd, 0xc4, 0xa1, 0x3c, 0x57, 0x6d, 0x60);
 
 /*
  * WinDivert supported layers.
@@ -480,6 +516,36 @@ static struct layer_s layer_forward_network_ipv6_0 =
 };
 static layer_t layer_forward_network_ipv6 = &layer_forward_network_ipv6_0;
 
+/*Add */
+static struct layer_s layer_assign_ale_0 =
+{
+	L"" WINDIVERT_DEVICE_NAME L"_SubLayer OutBound ALE ",
+	L"" WINDIVERT_DEVICE_NAME L" sublayer ALE establish",
+	L"" WINDIVERT_DEVICE_NAME L"_CalloutForwardNetworkIPv6",
+	L"" WINDIVERT_DEVICE_NAME L" callout network (forward IPv6)",
+	L"" WINDIVERT_DEVICE_NAME L"_FilterForwardNetworkIPv6",
+	L"" WINDIVERT_DEVICE_NAME L" filter network (forward IPv6)",
+	{0},
+	{0},
+	windivert_classify_assign_ale_callout,
+};
+static layer_t layer_assign_ale= &layer_assign_ale_0;//bind时分配资源的层
+
+
+static struct layer_s layer_closure_ale_0 =
+{
+	L"" WINDIVERT_DEVICE_NAME L"_SubLayer OutBound ALE ",
+	L"" WINDIVERT_DEVICE_NAME L" sublayer ALE establish",
+	L"" WINDIVERT_DEVICE_NAME L"_CalloutForwardNetworkIPv6",
+	L"" WINDIVERT_DEVICE_NAME L" callout network (forward IPv6)",
+	L"" WINDIVERT_DEVICE_NAME L"_FilterForwardNetworkIPv6",
+	L"" WINDIVERT_DEVICE_NAME L" filter network (forward IPv6)",
+	{0},
+	{0},
+	windivert_classify_closure_ale_callout,
+};
+static layer_t layer_closure_ale = &layer_closure_ale_0;//关闭连接时的层
+
 /*
  * WinDivert malloc/free.
  */
@@ -545,6 +611,13 @@ extern NTSTATUS DriverEntry(IN PDRIVER_OBJECT driver_obj,
     layer_outbound_network_ipv6->layer_guid = FWPM_LAYER_OUTBOUND_IPPACKET_V6;
     layer_forward_network_ipv4->layer_guid = FWPM_LAYER_IPFORWARD_V4;
     layer_forward_network_ipv6->layer_guid = FWPM_LAYER_IPFORWARD_V6;
+	
+	/*ADD*/
+	layer_assign_ale->layer_guid = FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V4;
+	layer_closure_ale->layer_guid = FWPM_LAYER_ALE_ENDPOINT_CLOSURE_V4;
+
+
+
     layer_inbound_network_ipv4->sublayer_guid =
         WINDIVERT_SUBLAYER_INBOUND_IPV4_GUID;
     layer_outbound_network_ipv4->sublayer_guid = 
@@ -557,6 +630,15 @@ extern NTSTATUS DriverEntry(IN PDRIVER_OBJECT driver_obj,
         WINDIVERT_SUBLAYER_FORWARD_IPV4_GUID;
     layer_forward_network_ipv6->sublayer_guid =
         WINDIVERT_SUBLAYER_FORWARD_IPV6_GUID;
+	
+	
+	/* Add */
+	layer_assign_ale->sublayer_guid = WINDIVERT_SUBLAYER_ASSIGNMENT_ALE_GUID;
+	layer_closure_ale->sublayer_guid = WINDIVERT_SUBLAYER_CLOSURE_ALE_GUID;
+	/*初始化链表*/
+
+	InitializeListHead(&ports_list_head);
+	KeInitializeSpinLock(&ports_list_lock);
 
     // Configure ourself as a non-PnP driver:
     WDF_DRIVER_CONFIG_INIT(&config, WDF_NO_EVENT_CALLBACK);
@@ -727,6 +809,20 @@ driver_entry_sublayer_error:
     {
         goto driver_entry_sublayer_error;
     }
+	
+	/*Add*/
+	status = windivert_install_sublayer(layer_assign_ale);
+	if (!NT_SUCCESS(status))
+	{
+		goto driver_entry_sublayer_error;
+	}
+
+	status = windivert_install_sublayer(layer_closure_ale);
+	if (!NT_SUCCESS(status))
+	{
+		goto driver_entry_sublayer_error;
+	}
+
     status = FwpmTransactionCommit0(engine_handle);
     if (!NT_SUCCESS(status))
     {
@@ -798,6 +894,14 @@ static void windivert_driver_unload(void)
             &layer_forward_network_ipv4->sublayer_guid);
         FwpmSubLayerDeleteByKey0(engine_handle,
             &layer_forward_network_ipv6->sublayer_guid);
+
+		/*Add   */
+		FwpmSubLayerDeleteByKey0(engine_handle,
+			&layer_assign_ale->sublayer_guid);
+		FwpmSubLayerDeleteByKey0(engine_handle,
+			&layer_closure_ale->sublayer_guid);
+		
+
         status = FwpmTransactionCommit0(engine_handle);
         if (!NT_SUCCESS(status))
         {
@@ -995,6 +1099,10 @@ static NTSTATUS windivert_install_callouts(context_t context, UINT8 layer,
         default:
             return STATUS_INVALID_PARAMETER;
     }
+	/*Add....*/
+	layers[i++] = layer_assign_ale;
+	layers[i++] = layer_closure_ale;
+
 
     for (j = 0; j < i; j++)
     {
