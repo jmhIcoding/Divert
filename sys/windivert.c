@@ -2096,7 +2096,7 @@ extern VOID windivert_ioctl(IN WDFQUEUE queue, IN WDFREQUEST request,
             BOOL is_inbound, is_outbound, is_ipv4, is_ipv6;
 
             filter0 = (windivert_ioctl_filter_t)outbuf;
-            filter0_len = outbuflen;
+            filter0_len = outbuflen;//在这里可以专门设置是否有
             filter = windivert_filter_compile(filter0, filter0_len);
             if (filter == NULL)
             {
