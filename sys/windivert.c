@@ -2096,7 +2096,7 @@ extern VOID windivert_ioctl(IN WDFQUEUE queue, IN WDFREQUEST request,
             BOOL is_inbound, is_outbound, is_ipv4, is_ipv6;
 
             filter0 = (windivert_ioctl_filter_t)outbuf;
-            filter0_len = outbuflen;//在这里可以专门设置是否有
+            filter0_len = outbuflen;//在这里可以专门设置是否有额外的
             filter = windivert_filter_compile(filter0, filter0_len);
             if (filter == NULL)
             {
@@ -3193,7 +3193,9 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
     }
 
     // Execute the filter:
-    ip = 0;
+    //ip = 0; -->原来的代码
+	/*Add 把proc都加到第0项去 ,其他匹配过程照常 --->控制第0 条为进程 */
+	ip = 1;
     ttl = WINDIVERT_FILTER_MAXLEN+1;       // Additional safety
     while (ttl-- != 0)
     {
@@ -3854,6 +3856,9 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
             case WINDIVERT_FILTER_FIELD_UDP_PAYLOADLENGTH:
                 filter0[i].protocol = WINDIVERT_FILTER_PROTOCOL_UDP;
                 break;
+			/* Add 添加新的ALE PROC HASH 字段*/
+			case WINDIVERT_FILTER_FIELD_ALE_PROCHASH:
+				filter0[i].protocol = WINDIVERT_FILTER_PROTOCOL_ALE;
             default:
                 goto windivert_filter_compile_exit;
         }
