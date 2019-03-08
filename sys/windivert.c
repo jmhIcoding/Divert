@@ -173,11 +173,21 @@ struct context_s
 };
 typedef struct context_s context_s;
 typedef struct context_s *context_t;
+
 typedef struct _ports_context_
 {
-	LIST_ENTRY list_head;
+	LIST_ENTRY list_entry;
 	USHORT localport;
-} ports_context,ports_context_t;
+} ports_context,*ports_context_t;
+
+
+typedef struct _proc_context_
+{
+	LIST_ENTRY list_entry;
+	UINT32 proc_hash;
+} proc_context, *proc_context_t;
+LIST_ENTRY proc_list_head;
+KSPIN_LOCK proc_list_lock;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(context_s, windivert_context_get);
 
@@ -305,12 +315,12 @@ static UINT32 windivert_context_priority(UINT32 priority0)
  * Prototypes.
  */
 static void windivert_driver_unload(void);
-extern VOID windivert_ioctl(IN WDFQUEUE queue, IN WDFREQUEST request,
+ VOID windivert_ioctl(IN WDFQUEUE queue, IN WDFREQUEST request,
     IN size_t in_length, IN size_t out_len, IN ULONG code);
 static NTSTATUS windivert_read(context_t context, WDFREQUEST request);
-extern VOID windivert_worker(IN WDFWORKITEM item);
+ VOID windivert_worker(IN WDFWORKITEM item);
 static void windivert_read_service(context_t context);
-extern VOID windivert_create(IN WDFDEVICE device, IN WDFREQUEST request,
+ VOID windivert_create(IN WDFDEVICE device, IN WDFREQUEST request,
     IN WDFFILEOBJECT object);
 static NTSTATUS windivert_install_sublayer(layer_t layer);
 static NTSTATUS windivert_install_callouts(context_t context, UINT8 layer,
@@ -319,12 +329,12 @@ static NTSTATUS windivert_install_callout(context_t context, UINT idx,
     layer_t layer);
 static void windivert_uninstall_callouts(context_t context,
     context_state_t state);
-extern VOID windivert_cleanup(IN WDFFILEOBJECT object);
-extern VOID windivert_close(IN WDFFILEOBJECT object);
-extern VOID windivert_destroy(IN WDFOBJECT object);
-extern NTSTATUS windivert_write(context_t context, WDFREQUEST request,
+ VOID windivert_cleanup(IN WDFFILEOBJECT object);
+ VOID windivert_close(IN WDFFILEOBJECT object);
+ VOID windivert_destroy(IN WDFOBJECT object);
+ NTSTATUS windivert_write(context_t context, WDFREQUEST request,
     PWINDIVERT_ADDRESS addr);
-extern void NTAPI windivert_inject_complete(VOID *context,
+ void NTAPI windivert_inject_complete(VOID *context,
     NET_BUFFER_LIST *packets, BOOLEAN dispatch_level);
 static NTSTATUS windivert_notify_callout(IN FWPS_CALLOUT_NOTIFY_TYPE type,
     IN const GUID *filter_key, IN const FWPS_FILTER0 *filter);
@@ -565,7 +575,7 @@ static VOID windivert_free(PVOID ptr)
 /*
  * WinDivert driver entry routine.
  */
-extern NTSTATUS DriverEntry(IN PDRIVER_OBJECT driver_obj,
+ NTSTATUS DriverEntry(IN PDRIVER_OBJECT driver_obj,
     IN PUNICODE_STRING reg_path)
 {
     WDF_DRIVER_CONFIG config;
@@ -639,6 +649,9 @@ extern NTSTATUS DriverEntry(IN PDRIVER_OBJECT driver_obj,
 
 	InitializeListHead(&ports_list_head);
 	KeInitializeSpinLock(&ports_list_lock);
+
+	InitializeListHead(&proc_list_head);
+	KeInitializeSpinLock(&proc_list_lock);
 
     // Configure ourself as a non-PnP driver:
     WDF_DRIVER_CONFIG_INIT(&config, WDF_NO_EVENT_CALLBACK);
@@ -843,7 +856,7 @@ driver_entry_exit:
 /*
  * WinDivert driver unload routine.
  */
-extern VOID windivert_unload(IN WDFDRIVER Driver)
+ VOID windivert_unload(IN WDFDRIVER Driver)
 {
     windivert_driver_unload();
 }
@@ -937,7 +950,7 @@ static NTSTATUS windivert_install_sublayer(layer_t layer)
 /*
  * WinDivert create routine.
  */
-extern VOID windivert_create(IN WDFDEVICE device, IN WDFREQUEST request,
+ VOID windivert_create(IN WDFDEVICE device, IN WDFREQUEST request,
     IN WDFFILEOBJECT object)
 {
     WDF_IO_QUEUE_CONFIG queue_config;
@@ -1332,7 +1345,7 @@ unregister_callouts:
 /*
  * Divert cleanup routine.
  */
-extern VOID windivert_cleanup(IN WDFFILEOBJECT object)
+ VOID windivert_cleanup(IN WDFFILEOBJECT object)
 {
     KLOCK_QUEUE_HANDLE lock_handle;
     PLIST_ENTRY entry;
@@ -1430,7 +1443,7 @@ windivert_cleanup_error:
 /*
  * WinDivert close routine.
  */
-extern VOID windivert_close(IN WDFFILEOBJECT object)
+ VOID windivert_close(IN WDFFILEOBJECT object)
 {
     KLOCK_QUEUE_HANDLE lock_handle;
     context_t context = windivert_context_get(object);
@@ -1453,7 +1466,7 @@ extern VOID windivert_close(IN WDFFILEOBJECT object)
 /*
  * WinDivert destroy routine.
  */
-extern VOID windivert_destroy(IN WDFOBJECT object)
+ VOID windivert_destroy(IN WDFOBJECT object)
 {
     KLOCK_QUEUE_HANDLE lock_handle;
     context_t context = windivert_context_get((WDFFILEOBJECT)object);
@@ -2023,7 +2036,7 @@ windivert_caller_context_error:
 /*
  * WinDivert I/O control.
  */
-extern VOID windivert_ioctl(IN WDFQUEUE queue, IN WDFREQUEST request,
+ VOID windivert_ioctl(IN WDFQUEUE queue, IN WDFREQUEST request,
     IN size_t out_length, IN size_t in_length, IN ULONG code)
 {
     KLOCK_QUEUE_HANDLE lock_handle;
@@ -3052,7 +3065,7 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
     UINT16 ip, ttl;
     UINT8 proto;
     NTSTATUS status;
-
+	USHORT localport = 0;
     // Parse the headers:
     tot_len = NET_BUFFER_DATA_LENGTH(buffer);
     if (tot_len < sizeof(WINDIVERT_IPHDR))
@@ -3175,10 +3188,12 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
         case IPPROTO_TCP:
             tcp_header = (PWINDIVERT_TCPHDR)NdisGetDataBuffer(buffer,
                 sizeof(WINDIVERT_TCPHDR), NULL, 1, 0);
+			localport = outbound? tcp_header->SrcPort:tcp_header->DstPort;
             break;
         case IPPROTO_UDP:
             udp_header = (PWINDIVERT_UDPHDR)NdisGetDataBuffer(buffer,
                 sizeof(WINDIVERT_UDPHDR), NULL, 1, 0);
+			localport = outbound? udp_header->SrcPort:udp_header->DstPort;
             break;
         default:
             break;
@@ -3194,7 +3209,23 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 
     // Execute the filter:
     //ip = 0; -->原来的代码
-	/*Add 把proc都加到第0项去 ,其他匹配过程照常 --->控制第0 条为进程 */
+	/*Add 把proc都加到第0项去 ,其他匹配过程照常 --->控制第0 条为进程哈希的匹配专用 */
+	KIRQL irql33;
+	KeAcquireSpinLock(&ports_list_lock, &irql33);
+	PLIST_ENTRY p;
+	for (p = ports_list_head.Flink; p != &ports_list_head; p = p->Flink)
+		//遍历各个源端口的值,看在不在里面
+	{
+		ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
+		if (localport == elem->localport)
+			//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
+		{
+			KeReleaseSpinLock(&ports_list_lock, &irql33);
+			return TRUE;
+		}
+	}
+	KeReleaseSpinLock(&ports_list_lock, &irql33);
+
 	ip = 1;
     ttl = WINDIVERT_FILTER_MAXLEN+1;       // Additional safety
     while (ttl-- != 0)
@@ -3644,6 +3675,7 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
  
     for (i = 0; i < length; i++)
     {
+
         if (ioctl_filter[i].field > WINDIVERT_FILTER_FIELD_MAX ||
             ioctl_filter[i].test > WINDIVERT_FILTER_TEST_MAX)
         {
@@ -3770,6 +3802,7 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
             default:
                 break;
         }
+
         filter0[i].field   = ioctl_filter[i].field;
         filter0[i].test    = ioctl_filter[i].test;
         filter0[i].success = ioctl_filter[i].success;
@@ -3778,6 +3811,24 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
         filter0[i].arg[1]  = ioctl_filter[i].arg[1];
         filter0[i].arg[2]  = ioctl_filter[i].arg[2];
         filter0[i].arg[3]  = ioctl_filter[i].arg[3];
+		if (ioctl_filter[i].field == WINDIVERT_FILTER_FIELD_ALE_PROCHASH)
+			//应用层专用的
+		{
+			if (filter0[i].arg[0] != 0)
+				//这个就是初始值,说明没有设置进程过滤
+			{
+				proc_context_t proc = (proc_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(proc_context), WINDIVERT_TAG);
+				proc->proc_hash = filter0[i].arg[0];//复用了
+				KIRQL irql;
+				KeAcquireSpinLock(&proc_list_lock, &irql);
+				if (IsListEmpty(&proc_list_head))
+					//只能插入一个进程列表
+				{
+					InsertHeadList(&proc_list_head, &proc->list_entry);
+				}
+				KeReleaseSpinLock(&proc_list_lock, &irql);
+			}
+		}
 
         // Protocol selection:
         switch (ioctl_filter[i].field)
@@ -3859,6 +3910,7 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
 			/* Add 添加新的ALE PROC HASH 字段*/
 			case WINDIVERT_FILTER_FIELD_ALE_PROCHASH:
 				filter0[i].protocol = WINDIVERT_FILTER_PROTOCOL_ALE;
+				break;
             default:
                 goto windivert_filter_compile_exit;
         }
@@ -3876,3 +3928,104 @@ windivert_filter_compile_exit:
     return result;
 }
 
+/*
+*	Add ale assign and closure calllout
+*/
+UINT32 windivert_hash(const char * data, int length)
+{
+	UINT32 rst = 1;
+
+	for (int i = 0; i < length; i++)
+	{
+		rst = (rst * HASHP + data[i]) % HASHMOD;
+	}
+	return rst;
+}
+static void windivert_classify_assign_ale_callout(
+	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
+	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
+	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
+	OUT FWPS_CLASSIFY_OUT0 *result)
+{
+	NTSTATUS status;
+	FWP_BYTE_BLOB * processPath;
+	if (!FWPS_IS_METADATA_FIELD_PRESENT(meta_vals, FWPS_METADATA_FIELD_PROCESS_PATH))
+	{
+		status = STATUS_NOT_FOUND;
+		goto cleanup;
+	}
+
+	processPath = meta_vals->processPath;
+	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
+	/*获取已经保存的proc_hash*/
+	KIRQL irql;
+	KeAcquireSpinLock(&proc_list_lock, &irql);
+	PLIST_ENTRY p;
+	if (!IsListEmpty(&proc_list_head))
+		//做了进程过滤
+	{
+		for (p = proc_list_head.Flink; p != &proc_list_head; p = p->Flink)
+			//遍历各个proc_hash值,其实就一个proc_hash
+		{
+			proc_context_t elem = CONTAINING_RECORD(p, proc_context, list_entry);
+			if (proc_hash == elem->proc_hash)
+				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
+			{
+				USHORT localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_ASSIGNMENT_V4_IP_LOCAL_PORT].value.int16;
+				ports_context_t port = (ports_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(ports_context), WINDIVERT_TAG);
+				port->localport = localport;
+				ExInterlockedInsertTailList(&ports_list_head, &port->list_entry, &ports_list_lock);//把端口插入到链表里面去
+			}
+		}
+	}
+	KeReleaseSpinLock(&proc_list_lock, &irql);
+
+cleanup:
+	return;
+}
+
+static void windivert_classify_closure_ale_callout(
+	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
+	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
+	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
+	OUT FWPS_CLASSIFY_OUT0 *result)
+{
+	NTSTATUS status;
+	FWP_BYTE_BLOB * processPath;
+	if (!FWPS_IS_METADATA_FIELD_PRESENT(meta_vals, FWPS_METADATA_FIELD_PROCESS_PATH))
+	{
+		status = STATUS_NOT_FOUND;
+		goto cleanup;
+	}
+
+	processPath = meta_vals->processPath;
+	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
+	/*获取已经保存的proc_hash*/
+	KIRQL irql;
+	KeAcquireSpinLock(&proc_list_lock, &irql);
+	PLIST_ENTRY p;
+	if (!IsListEmpty(&proc_list_head))
+		//做了进程过滤
+	{
+		for (p = proc_list_head.Flink; p != &proc_list_head; p = p->Flink)
+			//遍历各个proc_hash值
+		{
+			proc_context_t elem = CONTAINING_RECORD(p, proc_context, list_entry);
+			if (proc_hash == elem->proc_hash)
+				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
+			{
+				KIRQL irql2;
+				KeAcquireSpinLock(&ports_list_lock, &irql2);
+				while (!IsListEmpty(&ports_list_head))
+				{
+					RemoveHeadList(&ports_list_head);
+				}
+				KeReleaseSpinLock(&ports_list_lock, &irql2);
+			}
+		}
+	}
+	KeReleaseSpinLock(&proc_list_lock, &irql);
+
+cleanup:
+	return;
+} 

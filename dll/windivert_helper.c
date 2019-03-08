@@ -116,6 +116,7 @@ typedef enum
     TOKEN_SUB_IF_IDX,
     TOKEN_LOOPBACK,
     TOKEN_IMPOSTOR,
+	TOKEN_ALE_PROCHASH,
     TOKEN_OPEN,
     TOKEN_CLOSE,
     TOKEN_EQ,
@@ -810,7 +811,7 @@ static ERROR WinDivertTokenizeFilter(const char *filter, WINDIVERT_LAYER layer,
     TOKEN *tokens, UINT tokensmax)
 {
     static const TOKEN_NAME token_names[] =
-    {
+    {	{"ale.ProcHash",TOKEN_ALE_PROCHASH},
         {"and",                 TOKEN_AND},
         {"false",               TOKEN_FALSE},
         {"icmp",                TOKEN_ICMP},
@@ -1158,7 +1159,8 @@ static PEXPR WinDivertMakeVar(PPOOL pool, KIND kind)
         {{{0}}, TOKEN_IF_IDX},
         {{{0}}, TOKEN_SUB_IF_IDX},
         {{{0}}, TOKEN_LOOPBACK},
-        {{{0}}, TOKEN_IMPOSTOR}
+        {{{0}}, TOKEN_IMPOSTOR},
+		{{{0}},TOKEN_ALE_PROCHASH}
     };
 
     // Binary search:
@@ -1333,6 +1335,7 @@ static PEXPR WinDivertParseTest(PPOOL pool, TOKEN *toks, UINT *i)
         case TOKEN_UDP_LENGTH:
         case TOKEN_UDP_CHECKSUM:
         case TOKEN_UDP_PAYLOAD_LENGTH:
+		case TOKEN_ALE_PROCHASH:
             break;
         default:
             pool->error = MAKE_ERROR(WINDIVERT_ERROR_UNEXPECTED_TOKEN,
@@ -1912,6 +1915,9 @@ static void WinDivertEmitTest(PEXPR test, UINT16 offset,
         case TOKEN_UDP_PAYLOAD_LENGTH:
             object->field = WINDIVERT_FILTER_FIELD_UDP_PAYLOADLENGTH;
             break;
+		case TOKEN_ALE_PROCHASH:
+			object->field = WINDIVERT_FILTER_FIELD_ALE_PROCHASH;
+			break;
         default:
             return;
     }

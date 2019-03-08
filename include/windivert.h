@@ -70,6 +70,12 @@ extern "C" {
 /****************************************************************************/
 
 /*
+* Add, Hash function Data.
+*/
+	const UINT32 HASHP = (19950817);
+	const UINT32 HASHMOD = (1e9 + 7);
+
+/*
  * Divert address.
  */
 typedef struct
@@ -192,6 +198,7 @@ extern WINDIVERTEXPORT BOOL WinDivertGetParam(
     __in        HANDLE handle,
     __in        WINDIVERT_PARAM param,
     __out       UINT64 *pValue);
+
 
 #endif      /* WINDIVERT_KERNEL */
 
@@ -401,6 +408,7 @@ extern WINDIVERTEXPORT BOOL WinDivertHelperEvalFilter(
     __in        UINT packetLen,
     __in        PWINDIVERT_ADDRESS pAddr);
 
+extern WINDIVERTEXPORT UINT32 WinDivertHash(const char * str, int length);
 #endif      /* WINDIVERT_KERNEL */
 
 #ifdef __cplusplus

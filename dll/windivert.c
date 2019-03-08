@@ -43,7 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define WINDIVERTEXPORT
+//#define WINDIVERTEXPORT
 #include "windivert.h"
 #include "windivert_device.h"
 
@@ -397,6 +397,19 @@ static BOOL WinDivertIoControlEx(HANDLE handle, DWORD code, UINT8 arg8,
 }
 
 /*
+*  Hash a string to UINT32
+*/
+extern UINT32 WinDivertHash(const char * str, int length)
+{
+	UINT32 rst = 1;
+
+	for (int i = 0; i < length; i++)
+	{
+		rst = (rst * HASHP + str[i]) % HASHMOD;
+	}
+	return rst;
+}
+/*
  * Open a WinDivert handle.
  */
 extern HANDLE WinDivertOpen(const char *filter, WINDIVERT_LAYER layer,
@@ -424,7 +437,7 @@ extern HANDLE WinDivertOpen(const char *filter, WINDIVERT_LAYER layer,
         return INVALID_HANDLE_VALUE;
     }
 
-    // Compile the filter:
+    // Compile the filter:编译一下 有多少条规则
     comp_err = WinDivertCompileFilter(filter, layer, object, &obj_len);
     if (IS_ERROR(comp_err))
     {
