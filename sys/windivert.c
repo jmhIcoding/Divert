@@ -61,10 +61,11 @@ EVT_WDF_WORKITEM windivert_worker;
 /*
  * Debugging macros.
  */
-// #define DEBUG_ON
+//#define DEBUG_ON
 #define DEBUG_BUFSIZE       256
 
-#ifdef DEBUG_ON
+#define DEBUG_INFO_ON
+#ifdef DEBUG_INFO_ON
 static void DEBUG(PCCH format, ...)
 {
     va_list args;
@@ -91,7 +92,7 @@ static void DEBUG_ERROR(PCCH format, NTSTATUS status, ...)
     DbgPrint("WINDIVERT: *** ERROR ***: (status = %x): %s\n", status, buf);
     va_end(args);
 }
-#else       // DEBUG_ON
+#else       // DEBUG_INFO_ON
 #define DEBUG(format, ...)
 #define DEBUG_ERROR(format, status, ...)
 #endif
@@ -529,12 +530,12 @@ static layer_t layer_forward_network_ipv6 = &layer_forward_network_ipv6_0;
 /*Add */
 static struct layer_s layer_assign_ale_0 =
 {
-	L"" WINDIVERT_DEVICE_NAME L"_SubLayer OutBound ALE ",
-	L"" WINDIVERT_DEVICE_NAME L" sublayer ALE establish",
-	L"" WINDIVERT_DEVICE_NAME L"_CalloutForwardNetworkIPv6",
-	L"" WINDIVERT_DEVICE_NAME L" callout network (forward IPv6)",
-	L"" WINDIVERT_DEVICE_NAME L"_FilterForwardNetworkIPv6",
-	L"" WINDIVERT_DEVICE_NAME L" filter network (forward IPv6)",
+	L"" WINDIVERT_DEVICE_NAME L"_SubLayer Assign ALE ",
+	L"" WINDIVERT_DEVICE_NAME L" sublayer Assign ALE",
+	L"" WINDIVERT_DEVICE_NAME L"_CalloutAssign ALE",
+	L"" WINDIVERT_DEVICE_NAME L" calloutAssign ALE",
+	L"" WINDIVERT_DEVICE_NAME L"_FilterAssign ALE",
+	L"" WINDIVERT_DEVICE_NAME L" filter Assign ALE",
 	{0},
 	{0},
 	windivert_classify_assign_ale_callout,
@@ -544,12 +545,12 @@ static layer_t layer_assign_ale= &layer_assign_ale_0;//bind时分配资源的层
 
 static struct layer_s layer_closure_ale_0 =
 {
-	L"" WINDIVERT_DEVICE_NAME L"_SubLayer OutBound ALE ",
-	L"" WINDIVERT_DEVICE_NAME L" sublayer ALE establish",
-	L"" WINDIVERT_DEVICE_NAME L"_CalloutForwardNetworkIPv6",
-	L"" WINDIVERT_DEVICE_NAME L" callout network (forward IPv6)",
-	L"" WINDIVERT_DEVICE_NAME L"_FilterForwardNetworkIPv6",
-	L"" WINDIVERT_DEVICE_NAME L" filter network (forward IPv6)",
+	L"" WINDIVERT_DEVICE_NAME L"_SubLayer close ALE",
+	L"" WINDIVERT_DEVICE_NAME L" sublayer close ALE",
+	L"" WINDIVERT_DEVICE_NAME L"_Callout close ALE6",
+	L"" WINDIVERT_DEVICE_NAME L" callout close ALE",
+	L"" WINDIVERT_DEVICE_NAME L"_Filter close ALE",
+	L"" WINDIVERT_DEVICE_NAME L" filter close ALE",
 	{0},
 	{0},
 	windivert_classify_closure_ale_callout,
@@ -599,6 +600,7 @@ static VOID windivert_free(PVOID ptr)
     DEBUG("LOAD: loading WinDivert driver");
 
     // Use the "no execute" pool if available:
+	DbgPrint("First::::::Hello.....!");
     status = RtlGetVersion(&version);
     if (NT_SUCCESS(status))
     {
@@ -1069,52 +1071,53 @@ windivert_create_exit:
 /*
  * Register all WFP callouts.
  */
-static NTSTATUS windivert_install_callouts(context_t context, UINT8 layer,
-    BOOL is_inbound, BOOL is_outbound, BOOL is_ipv4, BOOL is_ipv6)
-{
-    UINT8 i, j;
-    layer_t layers[WINDIVERT_CONTEXT_MAXLAYERS];
-    NTSTATUS status = STATUS_SUCCESS;
+ static NTSTATUS windivert_install_callouts(context_t context, UINT8 layer,
+	 BOOL is_inbound, BOOL is_outbound, BOOL is_ipv4, BOOL is_ipv6)
+ {
+	 UINT8 i, j;
+	 layer_t layers[WINDIVERT_CONTEXT_MAXLAYERS];
+	 NTSTATUS status = STATUS_SUCCESS;
 
-    i = 0;
-    switch (layer)
-    {
-        case WINDIVERT_LAYER_NETWORK:
-            if (is_inbound && is_ipv4)
-            {
-                layers[i++] = layer_inbound_network_ipv4;
-            }
-            if (is_outbound && is_ipv4)
-            {
-                layers[i++] = layer_outbound_network_ipv4;
-            }
-            if (is_inbound && is_ipv6)
-            {
-                layers[i++] = layer_inbound_network_ipv6;
-            }
-            if (is_outbound && is_ipv6)
-            {
-                layers[i++] = layer_outbound_network_ipv6;
-            }
-            break;
+	 i = 0;
+	 switch (layer)
+	 {
+	 case WINDIVERT_LAYER_NETWORK:
+		 if (is_inbound && is_ipv4)
+		 {
+			 layers[i++] = layer_inbound_network_ipv4;
+		 }
+		 if (is_outbound && is_ipv4)
+		 {
+			 layers[i++] = layer_outbound_network_ipv4;
+		 }
+		 if (is_inbound && is_ipv6)
+		 {
+			 layers[i++] = layer_inbound_network_ipv6;
+		 }
+		 if (is_outbound && is_ipv6)
+		 {
+			 layers[i++] = layer_outbound_network_ipv6;
+		 }
+		 break;
 
-        case WINDIVERT_LAYER_NETWORK_FORWARD:
-            if (is_ipv4)
-            {
-                layers[i++] = layer_forward_network_ipv4;
-            }
-            if (is_ipv6)
-            {
-                layers[i++] = layer_forward_network_ipv6;
-            }
-            break;
+	 case WINDIVERT_LAYER_NETWORK_FORWARD:
+		 if (is_ipv4)
+		 {
+			 layers[i++] = layer_forward_network_ipv4;
+		 }
+		 if (is_ipv6)
+		 {
+			 layers[i++] = layer_forward_network_ipv6;
+		 }
+		 break;
 
-        default:
-            return STATUS_INVALID_PARAMETER;
-    }
-	/*Add....*/
-	layers[i++] = layer_assign_ale;
-	layers[i++] = layer_closure_ale;
+	 default:
+		 return STATUS_INVALID_PARAMETER;
+	 }
+	 /*Add....*/
+		 layers[i++] = layer_assign_ale;
+		 layers[i++] = layer_closure_ale;
+
 
 
     for (j = 0; j < i; j++)
@@ -1152,7 +1155,7 @@ static NTSTATUS windivert_install_callout(context_t context, UINT idx,
     WDFDEVICE device;
     HANDLE engine_handle;
     NTSTATUS status;
-
+	DEBUG("installing callout. index :%d \n", idx);
     KeAcquireInStackQueuedSpinLock(&context->lock, &lock_handle);
     if (context->state != WINDIVERT_CONTEXT_STATE_OPEN)
     {
@@ -1234,6 +1237,8 @@ static NTSTATUS windivert_install_callout(context_t context, UINT idx,
     }
     context->installed[idx] = TRUE;
     KeReleaseInStackQueuedSpinLock(&lock_handle);
+
+	DEBUG("install callout well. index :%d \n", idx);
 
     return STATUS_SUCCESS;
 
@@ -2111,6 +2116,7 @@ windivert_caller_context_error:
             filter0 = (windivert_ioctl_filter_t)outbuf;
             filter0_len = outbuflen;//在这里可以专门设置是否有额外的
             filter = windivert_filter_compile(filter0, filter0_len);
+			DEBUG("WINDIVERT:::Get filter data....");
             if (filter == NULL)
             {
                 status = STATUS_INVALID_PARAMETER;
@@ -2335,6 +2341,7 @@ static void windivert_classify_outbound_network_v4_callout(
     const FWPS_FILTER0 *filter, IN UINT64 flow_context,
     OUT FWPS_CLASSIFY_OUT0 *result)
 {
+	DbgPrint("call windivert_classify outbound callout...");
     windivert_classify_callout((context_t)filter->context,
         WINDIVERT_DIRECTION_OUTBOUND,
         fixed_vals->incomingValue[
@@ -2357,6 +2364,7 @@ static void windivert_classify_outbound_network_v6_callout(
     const FWPS_FILTER0 *filter, IN UINT64 flow_context,
     OUT FWPS_CLASSIFY_OUT0 *result)
 {
+
     windivert_classify_callout((context_t)filter->context,
         WINDIVERT_DIRECTION_OUTBOUND,
         fixed_vals->incomingValue[
@@ -2379,6 +2387,7 @@ static void windivert_classify_inbound_network_v4_callout(
     const FWPS_FILTER0 *filter, IN UINT64 flow_context,
     OUT FWPS_CLASSIFY_OUT0 *result)
 {
+	DbgPrint("call windivert_classify inbound callout...");
     UINT advance = meta_vals->ipHeaderSize;
     windivert_classify_callout((context_t)filter->context,
         WINDIVERT_DIRECTION_INBOUND,
@@ -3052,177 +3061,184 @@ static int windivert_big_num_compare(const UINT32 *a, const UINT32 *b)
  * Checks if the given packet is of interest.
  */
 static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
-    UINT32 sub_if_idx, BOOL outbound, BOOL is_ipv4, BOOL impostor,
-    BOOL loopback, filter_t filter)
+	UINT32 sub_if_idx, BOOL outbound, BOOL is_ipv4, BOOL impostor,
+	BOOL loopback, filter_t filter)
 {
-    size_t tot_len, ip_header_len;
-    PWINDIVERT_IPHDR ip_header = NULL;
-    PWINDIVERT_IPV6HDR ipv6_header = NULL;
-    PWINDIVERT_ICMPHDR icmp_header = NULL;
-    PWINDIVERT_ICMPV6HDR icmpv6_header = NULL;
-    PWINDIVERT_TCPHDR tcp_header = NULL;
-    PWINDIVERT_UDPHDR udp_header = NULL;
-    UINT16 ip, ttl;
-    UINT8 proto;
-    NTSTATUS status;
+	size_t tot_len, ip_header_len;
+	PWINDIVERT_IPHDR ip_header = NULL;
+	PWINDIVERT_IPV6HDR ipv6_header = NULL;
+	PWINDIVERT_ICMPHDR icmp_header = NULL;
+	PWINDIVERT_ICMPV6HDR icmpv6_header = NULL;
+	PWINDIVERT_TCPHDR tcp_header = NULL;
+	PWINDIVERT_UDPHDR udp_header = NULL;
+	UINT16 ip, ttl;
+	UINT8 proto;
+	NTSTATUS status;
 	USHORT localport = 0;
-    // Parse the headers:
-    tot_len = NET_BUFFER_DATA_LENGTH(buffer);
-    if (tot_len < sizeof(WINDIVERT_IPHDR))
-    {
-        DEBUG("FILTER: REJECT (packet length too small)");
-        return FALSE;
-    }
+	// Parse the headers:
+	tot_len = NET_BUFFER_DATA_LENGTH(buffer);
+	if (tot_len < sizeof(WINDIVERT_IPHDR))
+	{
+		DEBUG("FILTER: REJECT (packet length too small)");
+		return FALSE;
+	}
 
-    // Get the IP header.
-    if (is_ipv4)
-    {
-        // IPv4:
-        if (tot_len < sizeof(WINDIVERT_IPHDR))
-        {
-            DEBUG("FILTER: REJECT (packet length too small)");
-            return FALSE;
-        }
-        ip_header = (PWINDIVERT_IPHDR)NdisGetDataBuffer(buffer,
-            sizeof(WINDIVERT_IPHDR), NULL, 1, 0);
-        if (ip_header == NULL)
-        {
-            DEBUG("FILTER: REJECT (failed to get IPv4 header)");
-            return FALSE;
-        }
-        ip_header_len = ip_header->HdrLength*sizeof(UINT32);
-        if (ip_header->Version != 4 ||
-            RtlUshortByteSwap(ip_header->Length) != tot_len ||
-            ip_header->HdrLength < 5 ||
-            ip_header_len > tot_len)
-        {
-            DEBUG("FILTER: REJECT (bad IPv4 packet)");
-            return FALSE;
-        }
-        proto = ip_header->Protocol;
-        NdisAdvanceNetBufferDataStart(buffer, ip_header_len, FALSE, NULL);
-    }
-    else
-    {
-        // IPv6:
-        if (tot_len < sizeof(WINDIVERT_IPV6HDR))
-        {
-            DEBUG("FILTER: REJECT (packet length too small)");
-            return FALSE;
-        }
-        ipv6_header = (PWINDIVERT_IPV6HDR)NdisGetDataBuffer(buffer,
-            sizeof(WINDIVERT_IPV6HDR), NULL, 1, 0);
-        if (ipv6_header == NULL)
-        {
-            DEBUG("FILTER: REJECT (failed to get IPv6 header)");
-            return FALSE;
-        }
-        ip_header_len = sizeof(WINDIVERT_IPV6HDR);
-        if (ipv6_header->Version != 6 ||
-            ip_header_len > tot_len ||
-            RtlUshortByteSwap(ipv6_header->Length) +
-                sizeof(WINDIVERT_IPV6HDR) != tot_len)
-        {
-            DEBUG("FILTER: REJECT (bad IPv6 packet)");
-            return FALSE;
-        }
-        proto = ipv6_header->NextHdr;
-        NdisAdvanceNetBufferDataStart(buffer, ip_header_len, FALSE, NULL);
+	// Get the IP header.
+	if (is_ipv4)
+	{
+		// IPv4:
+		if (tot_len < sizeof(WINDIVERT_IPHDR))
+		{
+			DEBUG("FILTER: REJECT (packet length too small)");
+			return FALSE;
+		}
+		ip_header = (PWINDIVERT_IPHDR)NdisGetDataBuffer(buffer,
+			sizeof(WINDIVERT_IPHDR), NULL, 1, 0);
+		if (ip_header == NULL)
+		{
+			DEBUG("FILTER: REJECT (failed to get IPv4 header)");
+			return FALSE;
+		}
+		ip_header_len = ip_header->HdrLength * sizeof(UINT32);
+		if (ip_header->Version != 4 ||
+			RtlUshortByteSwap(ip_header->Length) != tot_len ||
+			ip_header->HdrLength < 5 ||
+			ip_header_len > tot_len)
+		{
+			DEBUG("FILTER: REJECT (bad IPv4 packet)");
+			return FALSE;
+		}
+		proto = ip_header->Protocol;
+		NdisAdvanceNetBufferDataStart(buffer, ip_header_len, FALSE, NULL);
+	}
+	else
+	{
+		// IPv6:
+		if (tot_len < sizeof(WINDIVERT_IPV6HDR))
+		{
+			DEBUG("FILTER: REJECT (packet length too small)");
+			return FALSE;
+		}
+		ipv6_header = (PWINDIVERT_IPV6HDR)NdisGetDataBuffer(buffer,
+			sizeof(WINDIVERT_IPV6HDR), NULL, 1, 0);
+		if (ipv6_header == NULL)
+		{
+			DEBUG("FILTER: REJECT (failed to get IPv6 header)");
+			return FALSE;
+		}
+		ip_header_len = sizeof(WINDIVERT_IPV6HDR);
+		if (ipv6_header->Version != 6 ||
+			ip_header_len > tot_len ||
+			RtlUshortByteSwap(ipv6_header->Length) +
+			sizeof(WINDIVERT_IPV6HDR) != tot_len)
+		{
+			DEBUG("FILTER: REJECT (bad IPv6 packet)");
+			return FALSE;
+		}
+		proto = ipv6_header->NextHdr;
+		NdisAdvanceNetBufferDataStart(buffer, ip_header_len, FALSE, NULL);
 
-        // Skip extension headers:
-        while (TRUE)
-        {
-            UINT8 *ext_header;
-            size_t ext_header_len;
-            BOOL isexthdr = TRUE;
+		// Skip extension headers:
+		while (TRUE)
+		{
+			UINT8 *ext_header;
+			size_t ext_header_len;
+			BOOL isexthdr = TRUE;
 
-            ext_header = (UINT8 *)NdisGetDataBuffer(buffer, 2, NULL, 1, 0);
-            if (ext_header == NULL)
-            {
-                break;
-            }
+			ext_header = (UINT8 *)NdisGetDataBuffer(buffer, 2, NULL, 1, 0);
+			if (ext_header == NULL)
+			{
+				break;
+			}
 
-            ext_header_len = (size_t)ext_header[1];
-            switch (proto)
-            {
-                case IPPROTO_FRAGMENT:
-                    ext_header_len = 8;
-                    break;
-                case IPPROTO_AH:
-                    ext_header_len += 2;
-                    ext_header_len *= 4;
-                    break;
-                case IPPROTO_HOPOPTS:
-                case IPPROTO_DSTOPTS:
-                case IPPROTO_ROUTING:
-                    ext_header_len++;
-                    ext_header_len *= 8;
-                    break;
-                default:
-                    isexthdr = FALSE;
-                    break;
-            }
+			ext_header_len = (size_t)ext_header[1];
+			switch (proto)
+			{
+			case IPPROTO_FRAGMENT:
+				ext_header_len = 8;
+				break;
+			case IPPROTO_AH:
+				ext_header_len += 2;
+				ext_header_len *= 4;
+				break;
+			case IPPROTO_HOPOPTS:
+			case IPPROTO_DSTOPTS:
+			case IPPROTO_ROUTING:
+				ext_header_len++;
+				ext_header_len *= 8;
+				break;
+			default:
+				isexthdr = FALSE;
+				break;
+			}
 
-            if (!isexthdr)
-            {
-                break;
-            }
+			if (!isexthdr)
+			{
+				break;
+			}
 
-            proto = ext_header[0];
-            ip_header_len += ext_header_len;
-            NdisAdvanceNetBufferDataStart(buffer, ext_header_len, FALSE,
-                NULL);
-        }
-    }
+			proto = ext_header[0];
+			ip_header_len += ext_header_len;
+			NdisAdvanceNetBufferDataStart(buffer, ext_header_len, FALSE,
+				NULL);
+		}
+	}
 
-    switch (proto)
-    {
-        case IPPROTO_ICMP:
-            icmp_header = (PWINDIVERT_ICMPHDR)NdisGetDataBuffer(buffer,
-                sizeof(WINDIVERT_ICMPHDR), NULL, 1, 0);
-            break;
-        case IPPROTO_ICMPV6:
-            icmpv6_header = (PWINDIVERT_ICMPV6HDR)NdisGetDataBuffer(buffer,
-                sizeof(WINDIVERT_ICMPV6HDR), NULL, 1, 0);
-            break;
-        case IPPROTO_TCP:
-            tcp_header = (PWINDIVERT_TCPHDR)NdisGetDataBuffer(buffer,
-                sizeof(WINDIVERT_TCPHDR), NULL, 1, 0);
-			localport = outbound? tcp_header->SrcPort:tcp_header->DstPort;
-            break;
-        case IPPROTO_UDP:
-            udp_header = (PWINDIVERT_UDPHDR)NdisGetDataBuffer(buffer,
-                sizeof(WINDIVERT_UDPHDR), NULL, 1, 0);
-			localport = outbound? udp_header->SrcPort:udp_header->DstPort;
-            break;
-        default:
-            break;
-    }
+	switch (proto)
+	{
+	case IPPROTO_ICMP:
+		icmp_header = (PWINDIVERT_ICMPHDR)NdisGetDataBuffer(buffer,
+			sizeof(WINDIVERT_ICMPHDR), NULL, 1, 0);
+		break;
+	case IPPROTO_ICMPV6:
+		icmpv6_header = (PWINDIVERT_ICMPV6HDR)NdisGetDataBuffer(buffer,
+			sizeof(WINDIVERT_ICMPV6HDR), NULL, 1, 0);
+		break;
+	case IPPROTO_TCP:
+		tcp_header = (PWINDIVERT_TCPHDR)NdisGetDataBuffer(buffer,
+			sizeof(WINDIVERT_TCPHDR), NULL, 1, 0);
+		localport = outbound ? tcp_header->SrcPort : 0;
+		break;
+	case IPPROTO_UDP:
+		udp_header = (PWINDIVERT_UDPHDR)NdisGetDataBuffer(buffer,
+			sizeof(WINDIVERT_UDPHDR), NULL, 1, 0);
+		localport = outbound ? udp_header->SrcPort : 0;
+		break;
+	default:
+		break;
+	}
 
-    status = NdisRetreatNetBufferDataStart(buffer, ip_header_len, 0, NULL);
-    if (!NT_SUCCESS(status))
-    {
-        // Should never occur.
-        DEBUG("FILTER: REJECT (failed to retreat buffer)");
-        return FALSE;
-    }
+	status = NdisRetreatNetBufferDataStart(buffer, ip_header_len, 0, NULL);
+	if (!NT_SUCCESS(status))
+	{
+		// Should never occur.
+		DEBUG("FILTER: REJECT (failed to retreat buffer)");
+		return FALSE;
+	}
 
-    // Execute the filter:
-    //ip = 0; -->原来的代码
+	// Execute the filter:
+	//ip = 0; -->原来的代码
 	/*Add 把proc都加到第0项去 ,其他匹配过程照常 --->控制第0 条为进程哈希的匹配专用 */
 	KIRQL irql33;
 	//KeAcquireSpinLock(&ports_list_lock, &irql33);
 	PLIST_ENTRY p;
+	ports_context_t elem;
 	for (p = ports_list_head.Flink; p != &ports_list_head; p = p->Flink)
 		//遍历各个源端口的值,看在不在里面
 	{
 		ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
+		DEBUG("scan port:%d==%d", localport, elem->localport);
 		if (localport == elem->localport)
 			//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 		{
 			//KeReleaseSpinLock(&ports_list_lock, &irql33);
 			return TRUE;
 		}
+	}
+	if (IsListEmpty(&ports_list_head))
+	{
+		DEBUG("scan port not pass.");
+		return FALSE;
 	}
 	//KeReleaseSpinLock(&ports_list_lock, &irql33);
 
@@ -3469,6 +3485,22 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
                     field[0] = (UINT32)(tot_len - ip_header_len -
                         sizeof(WINDIVERT_UDPHDR));
                     break;
+				case WINDIVERT_FILTER_FIELD_ALE_PROCHASH:
+					for (p = ports_list_head.Flink; p != &ports_list_head; p = p->Flink)
+						//遍历各个源端口的值,看在不在里面
+					{
+						
+						elem = CONTAINING_RECORD(p, ports_context, list_entry);
+						DEBUG("scan for the proper port:%d ==%d ", localport, elem->localport);
+						result = FALSE;
+						if (localport!=0 && localport == elem->localport)
+							//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
+						{
+							result = TRUE;//匹配成功了
+							goto ___nice__jump;
+						}
+					}
+					break;
                 default:
                     field[0] = 0;
                     break;
@@ -3499,6 +3531,7 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
                     break;
             }
         }
+	___nice__jump:
         ip = (result? filter[ip].success: filter[ip].failure);
         if (ip == WINDIVERT_FILTER_RESULT_ACCEPT)
         {
@@ -3815,7 +3848,7 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
 			//应用层专用的
 		{
 			if (filter0[i].arg[0] != 0)
-				//这个就是初始值,说明没有设置进程过滤
+				//这个0 就是初始值,说明没有设置进程过滤
 			{
 				proc_context_t proc = (proc_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(proc_context), WINDIVERT_TAG);
 				proc->proc_hash = filter0[i].arg[0];//复用了
@@ -3826,6 +3859,7 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
 				{
 					InsertHeadList(&proc_list_head, &proc->list_entry);
 				}
+				DEBUG("WINDIVERT::: ProcHash :%d...", proc->proc_hash);
 				//KeReleaseSpinLock(&proc_list_lock, &irql);
 			}
 		}
@@ -3935,7 +3969,7 @@ UINT32 windivert_hash(const char * data, int length)
 {
 	UINT32 rst = 1;
 
-	for (int i = 0; i < length; i++)
+	for (int i = 0; i < length-2; i++)
 	{
 		rst = (rst * HASHP + data[i]) % HASHMOD;
 	}
@@ -3947,6 +3981,7 @@ static void windivert_classify_assign_ale_callout(
 	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
 	OUT FWPS_CLASSIFY_OUT0 *result)
 {
+	DEBUG("assign ..... ale........");
 	NTSTATUS status;
 	FWP_BYTE_BLOB * processPath;
 	if (!FWPS_IS_METADATA_FIELD_PRESENT(meta_vals, FWPS_METADATA_FIELD_PROCESS_PATH))
@@ -3968,6 +4003,11 @@ static void windivert_classify_assign_ale_callout(
 			//遍历各个proc_hash值,其实就一个proc_hash
 		{
 			proc_context_t elem = CONTAINING_RECORD(p, proc_context, list_entry);
+			UINT8 *data = ExAllocatePoolWithTag(PagedPool, sizeof(UINT8)* processPath->size, WINDIVERT_TAG);
+			memcpy(data, processPath->data, processPath->size);
+			DEBUG("Hello,Now the process path is %S.  size:%d ", data,processPath->size);
+			ExFreePoolWithTag(data, WINDIVERT_TAG);
+			DEBUG("Hello,,,,Now... cmp the proc hash.%d(new) == %d(old) ???", proc_hash, elem->proc_hash);
 			if (proc_hash == elem->proc_hash)
 				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 			{
@@ -3975,6 +4015,7 @@ static void windivert_classify_assign_ale_callout(
 				ports_context_t port = (ports_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(ports_context), WINDIVERT_TAG);
 				port->localport = localport;
 				ExInterlockedInsertTailList(&ports_list_head, &port->list_entry, &ports_list_lock);//把端口插入到链表里面去
+				DEBUG("Hello,,Now ,insert new port:%d...", port->localport);
 			}
 		}
 	}
@@ -3990,6 +4031,7 @@ static void windivert_classify_closure_ale_callout(
 	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
 	OUT FWPS_CLASSIFY_OUT0 *result)
 {
+	DEBUG("closure ..... ale........");
 	NTSTATUS status;
 	FWP_BYTE_BLOB * processPath;
 	if (!FWPS_IS_METADATA_FIELD_PRESENT(meta_vals, FWPS_METADATA_FIELD_PROCESS_PATH))
