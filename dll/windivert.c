@@ -315,6 +315,7 @@ WinDivertDriverInstallExit:
             else
             {
                 // Failed to start service; clean-up:
+				fprintf(stdout, "Error::: Fail to start Services...%d \n", __LINE__);
                 ControlService(service, SERVICE_CONTROL_STOP, &status);
                 DeleteService(service);
                 CloseServiceHandle(service);
@@ -441,6 +442,7 @@ extern HANDLE WinDivertOpen(const char *filter, WINDIVERT_LAYER layer,
     comp_err = WinDivertCompileFilter(filter, layer, object, &obj_len);
     if (IS_ERROR(comp_err))
     {
+		fprintf(stdout, "\n WinDivert Erorr:::::fitler error,line:%d\n",__LINE__);
         SetLastError(ERROR_INVALID_PARAMETER);
         return INVALID_HANDLE_VALUE;
     }
@@ -456,6 +458,7 @@ extern HANDLE WinDivertOpen(const char *filter, WINDIVERT_LAYER layer,
     if (handle == INVALID_HANDLE_VALUE)
     {
         err = GetLastError();
+		fprintf(stdout, "Error Install Error....\n");
         if (err != ERROR_FILE_NOT_FOUND && err != ERROR_PATH_NOT_FOUND)
         {
             return INVALID_HANDLE_VALUE;
@@ -470,6 +473,7 @@ extern HANDLE WinDivertOpen(const char *filter, WINDIVERT_LAYER layer,
             {
                 SetLastError(ERROR_OPEN_FAILED);
             }
+			fprintf(stdout, "Error Install Error....\n");
             return INVALID_HANDLE_VALUE;
         }
         handle = CreateFile(L"\\\\.\\" WINDIVERT_DEVICE_NAME,
