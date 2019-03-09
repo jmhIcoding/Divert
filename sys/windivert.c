@@ -3211,7 +3211,7 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
     //ip = 0; -->原来的代码
 	/*Add 把proc都加到第0项去 ,其他匹配过程照常 --->控制第0 条为进程哈希的匹配专用 */
 	KIRQL irql33;
-	KeAcquireSpinLock(&ports_list_lock, &irql33);
+	//KeAcquireSpinLock(&ports_list_lock, &irql33);
 	PLIST_ENTRY p;
 	for (p = ports_list_head.Flink; p != &ports_list_head; p = p->Flink)
 		//遍历各个源端口的值,看在不在里面
@@ -3220,11 +3220,11 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 		if (localport == elem->localport)
 			//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 		{
-			KeReleaseSpinLock(&ports_list_lock, &irql33);
+			//KeReleaseSpinLock(&ports_list_lock, &irql33);
 			return TRUE;
 		}
 	}
-	KeReleaseSpinLock(&ports_list_lock, &irql33);
+	//KeReleaseSpinLock(&ports_list_lock, &irql33);
 
 	ip = 1;
     ttl = WINDIVERT_FILTER_MAXLEN+1;       // Additional safety
@@ -3820,13 +3820,13 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
 				proc_context_t proc = (proc_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(proc_context), WINDIVERT_TAG);
 				proc->proc_hash = filter0[i].arg[0];//复用了
 				KIRQL irql;
-				KeAcquireSpinLock(&proc_list_lock, &irql);
+				//KeAcquireSpinLock(&proc_list_lock, &irql);
 				if (IsListEmpty(&proc_list_head))
 					//只能插入一个进程列表
 				{
 					InsertHeadList(&proc_list_head, &proc->list_entry);
 				}
-				KeReleaseSpinLock(&proc_list_lock, &irql);
+				//KeReleaseSpinLock(&proc_list_lock, &irql);
 			}
 		}
 
@@ -3959,7 +3959,7 @@ static void windivert_classify_assign_ale_callout(
 	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
 	/*获取已经保存的proc_hash*/
 	KIRQL irql;
-	KeAcquireSpinLock(&proc_list_lock, &irql);
+	//KeAcquireSpinLock(&proc_list_lock, &irql);
 	PLIST_ENTRY p;
 	if (!IsListEmpty(&proc_list_head))
 		//做了进程过滤
@@ -3978,7 +3978,7 @@ static void windivert_classify_assign_ale_callout(
 			}
 		}
 	}
-	KeReleaseSpinLock(&proc_list_lock, &irql);
+	//KeReleaseSpinLock(&proc_list_lock, &irql);
 
 cleanup:
 	return;
@@ -4002,7 +4002,7 @@ static void windivert_classify_closure_ale_callout(
 	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
 	/*获取已经保存的proc_hash*/
 	KIRQL irql;
-	KeAcquireSpinLock(&proc_list_lock, &irql);
+	//KeAcquireSpinLock(&proc_list_lock, &irql);
 	PLIST_ENTRY p;
 	if (!IsListEmpty(&proc_list_head))
 		//做了进程过滤
@@ -4015,16 +4015,16 @@ static void windivert_classify_closure_ale_callout(
 				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 			{
 				KIRQL irql2;
-				KeAcquireSpinLock(&ports_list_lock, &irql2);
+				//KeAcquireSpinLock(&ports_list_lock, &irql2);
 				while (!IsListEmpty(&ports_list_head))
 				{
 					RemoveHeadList(&ports_list_head);
 				}
-				KeReleaseSpinLock(&ports_list_lock, &irql2);
+				//KeReleaseSpinLock(&ports_list_lock, &irql2);
 			}
 		}
 	}
-	KeReleaseSpinLock(&proc_list_lock, &irql);
+	//KeReleaseSpinLock(&proc_list_lock, &irql);
 
 cleanup:
 	return;
