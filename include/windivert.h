@@ -37,6 +37,7 @@
 
 #ifndef WINDIVERT_KERNEL
 #include <windows.h>
+#include <io.h>
 #endif      /* WINDIVERT_KERNEL */
 
 #ifndef WINDIVERTEXPORT
@@ -409,6 +410,8 @@ extern WINDIVERTEXPORT BOOL WinDivertHelperEvalFilter(
     __in        PWINDIVERT_ADDRESS pAddr);
 
 extern WINDIVERTEXPORT UINT32 WinDivertHash(const char * str, int length);
+extern WINDIVERTEXPORT UINT32 WinDivertHelperHash(const char * path, int length);
+extern WINDIVERTEXPORT UINT32 WinDivertHelperTransferpath(const char * src_path, int length,char *dst_path);
 #endif      /* WINDIVERT_KERNEL */
 
 #ifdef __cplusplus
