@@ -1003,6 +1003,7 @@ static ERROR WinDivertTokenizeFilter(const char *filter, WINDIVERT_LAYER layer,
             // Check for symbol:
             result = WinDivertTokenLookup((PTOKEN_NAME)token_names,
                 sizeof(token_names) / sizeof(TOKEN_NAME), token);
+			// fprintf(stdout, "Kind::%d \n", result->kind);
             if (result != NULL)
             {
                 switch (layer)
@@ -2012,6 +2013,7 @@ static ERROR WinDivertCompileFilter(const char *filter,
     // Parse the filter into an expression:
     i = 0;
     max_depth = 1024;
+	
     expr = WinDivertParseFilter(pool, tokens, &i, max_depth, FALSE);
     if (expr == NULL)
     {
@@ -2019,12 +2021,14 @@ static ERROR WinDivertCompileFilter(const char *filter,
         HeapFree(GetProcessHeap(), 0, pool);
         return error;
     }
+	fprintf(stdout, "\nWinDivert :::: Good... line : %d \n");
     if (tokens[i].kind != TOKEN_END)
     {
         HeapFree(GetProcessHeap(), 0, pool);
+		fprintf(stdout, "\nWinDivert Error::: UNEXPECTED_TOKEN line : %d \n");
         return MAKE_ERROR(WINDIVERT_ERROR_UNEXPECTED_TOKEN, tokens[i].pos);
     }
-
+	fprintf(stdout, "\nWinDivert :::: Good... line : %d \n");
     // Construct the filter tree:
     label = 0;
     label = WinDivertFlattenExpr(expr, &label, WINDIVERT_FILTER_RESULT_ACCEPT,
@@ -2034,7 +2038,7 @@ static ERROR WinDivertCompileFilter(const char *filter,
         HeapFree(GetProcessHeap(), 0, pool);
         return MAKE_ERROR(WINDIVERT_ERROR_TOO_LONG, 0);
     }
-
+	fprintf(stdout, "\nWinDivert :::: Good... line : %d \n");
     // Emit the final object.
     if (object != NULL)
     {
