@@ -403,12 +403,91 @@ static BOOL WinDivertIoControlEx(HANDLE handle, DWORD code, UINT8 arg8,
 extern UINT32 WinDivertHash(const char * str, int length)
 {
 	UINT32 rst = 1;
-
-	for (int i = 0; i < length; i++)
+	int i;
+	for (i = 0; i < length; i += 1)
 	{
 		rst = (rst * HASHP + str[i]) % HASHMOD;
+		rst = (rst * HASHP + 0) % HASHMOD;
+		//printf("0x%x 0x%x ", (unsigned char)str[i],(unsigned char) str[i + 1]);
+		//printf("0x%x 0x%x ", (unsigned char)str[i], (unsigned char)0);
 	}
 	return rst;
+}
+
+/*
+* Scan path ,change the 
+*/
+
+extern  UINT32 WinDivertHelperHash(const char * str, int length)
+{
+	char dst_path[256] = { 0 };
+	UINT32 rst = 0;
+	UINT32 status = WinDivertHelperTransferpath(str, strlen(str), dst_path);
+	if (status != 0)
+	{
+		rst = WinDivertHash(dst_path, strlen(dst_path));
+	}
+	return rst;
+}
+extern  UINT32 WinDivertHelperTransferpath(const char * src_path, int length, char *dst_path)
+{
+	int i, j;
+	i = j = 0;
+	int err_flag = -1;
+	if (access(src_path, 0) == 0)
+	{
+		if (src_path[1] == ':')
+		{
+			LPCSTR lpDeviceName;
+			CHAR device[4] = { 0 };
+			TCHAR lpTargetPath[256] = { 0 };
+			device[0] = src_path[0], device[1] = src_path[1];
+			lpDeviceName = device;
+			QueryDosDevice(lpDeviceName, lpTargetPath, 256);
+			int index = -1;
+			for (j = 0; j < strlen(lpTargetPath); j++)
+			{
+				if ((lpTargetPath[j] - '0') >= 0 && (lpTargetPath[j] - '0') <= 9)
+				{
+					index = lpTargetPath[j] - '0';
+				}
+			}
+			if (index != -1)
+			{
+				snprintf(dst_path,256, "\\device\\harddiskvolume%d%s", index, src_path + 2);
+				if (strlen(dst_path) >= 256)
+				{
+					SetLastError(104);
+					return -1;
+				}
+				for (int j = 0; j < strlen(dst_path); j++)
+				{
+					if (dst_path[j] >= 'A' && dst_path[j] <= 'Z')
+					{
+						dst_path[j] = dst_path[j] - 'A' + 'a';
+					}
+				}
+				
+			}
+			else
+			{
+				SetLastError(103);
+				return -1;
+			}
+		}
+		else
+		{
+			SetLastError(101);
+			return -1;
+		}
+
+	}
+	else
+	{
+		SetLastError(102);
+		return -1;
+	}
+	return 0;
 }
 /*
  * Open a WinDivert handle.
