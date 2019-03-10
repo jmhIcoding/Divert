@@ -384,6 +384,12 @@ static void windivert_classify_closure_ale_callout(
 	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
 	OUT FWPS_CLASSIFY_OUT0 *result);
 
+static void windivert_classify_release_ale_callout(
+	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
+	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
+	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
+	OUT FWPS_CLASSIFY_OUT0 *result);
+
 
 static void windivert_classify_callout(context_t context, IN UINT8 direction,
     IN UINT32 if_idx, IN UINT32 sub_if_idx, IN BOOL is_ipv4,
@@ -437,9 +443,17 @@ DEFINE_GUID(WINDIVERT_SUBLAYER_FORWARD_IPV6_GUID,
 DEFINE_GUID(WINDIVERT_SUBLAYER_ASSIGNMENT_ALE_GUID ,
 	0xaa905955, 0x4fe2, 0x4f3e, 0xa0, 0xc1, 0x8, 0xb6, 0x54, 0x55, 0xcd, 0x94);
 
-// {BFB0AE8A-CA28-4FB7-B7CD-C4A13C576D60}
+// {BFB0AE8A-CA28-4FB7-B7CD-C4A13C576D60} socket endpoint is closed
+//A filter at the FWPM_LAYER_ALE_ENDPOINT_CLOSURE_V{4|6} layer is matched when a connected TCP flow or UDP sockets endpoint is closed. 
 DEFINE_GUID(WINDIVERT_SUBLAYER_CLOSURE_ALE_GUID,
 	0xbfb0ae8a, 0xca28, 0x4fb7, 0xb7, 0xcd, 0xc4, 0xa1, 0x3c, 0x57, 0x6d, 0x60);
+
+
+// {A24F6AC4-1328-46A9-B906-CBABD8DC0BD4}	assignment资源释放 
+// A filter at the FWPM_LAYER_ALE_RESOURCE_RELEASE_V{4|6} layer is matched after resources that were allocated via RESOURCE_ASSIGNMENT have been freed.
+DEFINE_GUID(WINDIVERT_SUBLAYER_RELEASE_ALE_GUID ,
+	0xa24f6ac4, 0x1328, 0x46a9, 0xb9, 0x6, 0xcb, 0xab, 0xd8, 0xdc, 0xb, 0xd4);
+
 
 /*
  * WinDivert supported layers.
@@ -543,6 +557,19 @@ static struct layer_s layer_assign_ale_0 =
 };
 static layer_t layer_assign_ale= &layer_assign_ale_0;//bind时分配资源的层
 
+static struct layer_s layer_release_ale_0 =
+{
+	L"" WINDIVERT_DEVICE_NAME L"_SubLayer close ALE",
+	L"" WINDIVERT_DEVICE_NAME L" sublayer close ALE",
+	L"" WINDIVERT_DEVICE_NAME L"_Callout close ALE6",
+	L"" WINDIVERT_DEVICE_NAME L" callout close ALE",
+	L"" WINDIVERT_DEVICE_NAME L"_Filter close ALE",
+	L"" WINDIVERT_DEVICE_NAME L" filter close ALE",
+	{0},
+	{0},
+	windivert_classify_release_ale_callout,
+};
+static layer_t layer_release_ale = &layer_release_ale_0;//关闭连接时的层
 
 static struct layer_s layer_closure_ale_0 =
 {
@@ -628,7 +655,7 @@ static VOID windivert_free(PVOID ptr)
 	/*ADD*/
 	layer_assign_ale->layer_guid = FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V4;
 	layer_closure_ale->layer_guid = FWPM_LAYER_ALE_ENDPOINT_CLOSURE_V4;
-
+	layer_release_ale->layer_guid = FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V4;
 
 
     layer_inbound_network_ipv4->sublayer_guid =
@@ -648,6 +675,7 @@ static VOID windivert_free(PVOID ptr)
 	/* Add */
 	layer_assign_ale->sublayer_guid = WINDIVERT_SUBLAYER_ASSIGNMENT_ALE_GUID;
 	layer_closure_ale->sublayer_guid = WINDIVERT_SUBLAYER_CLOSURE_ALE_GUID;
+	layer_assign_ale->sublayer_guid = WINDIVERT_SUBLAYER_RELEASE_ALE_GUID;
 	/*初始化链表*/
 
 	InitializeListHead(&ports_list_head);
@@ -916,7 +944,8 @@ static void windivert_driver_unload(void)
 			&layer_assign_ale->sublayer_guid);
 		FwpmSubLayerDeleteByKey0(engine_handle,
 			&layer_closure_ale->sublayer_guid);
-		
+		FwpmSubLayerDeleteByKey0(engine_handle,
+			&layer_release_ale->sublayer_guid);
 
         status = FwpmTransactionCommit0(engine_handle);
         if (!NT_SUCCESS(status))
@@ -1102,6 +1131,7 @@ windivert_create_exit:
 		 /*Add....*/
 		 layers[i++] = layer_assign_ale;
 		 layers[i++] = layer_closure_ale;
+		 layers[i++] = layer_release_ale;
 		 break;
 
 	 case WINDIVERT_LAYER_NETWORK_FORWARD:
@@ -1116,6 +1146,7 @@ windivert_create_exit:
 		 /*Add....*/
 		 layers[i++] = layer_assign_ale;
 		 layers[i++] = layer_closure_ale;
+		 layers[i++] = layer_release_ale;
 		 break;
 
 	 default:
@@ -3228,34 +3259,9 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 	}
 
 	// Execute the filter:
-	//ip = 0; -->原来的代码
-	/*Add 把proc都加到第0项去 ,其他匹配过程照常 --->控制第0 条为进程哈希的匹配专用 */
+
 	PLIST_ENTRY p;
 	ports_context_t elem;
-	//DEBUG("begin scan port:");
-	//DEBUG("TEST fitler from rule 0 process port");
-	//KLOCK_QUEUE_HANDLE lock_handle;
-	//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
-	//for (p = ports_list_head.Flink;p != &ports_list_head; p = p->Flink)
-		//遍历各个源端口的值,看在不在面
-	//{
-	//	ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
-		//DEBUG("scan port:%d==%d", localport, elem->localport);
-	//	if (localport == elem->localport)
-			//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
-	//	{
-			//KeReleaseInStackQueuedSpinLock(&lock_handle);
-	//		return TRUE;
-	//	}
-	//}
-	//if (!IsListEmpty(&ports_list_head))
-	//{
-		//DEBUG("scan port not pass.");
-		//KeReleaseInStackQueuedSpinLock(&lock_handle);
-	//	return FALSE;
-	//}
-	//KeReleaseInStackQueuedSpinLock(&lock_handle);
-	//DEBUG("TEST fitler from rule 1");
 	ip = 0;
     ttl = WINDIVERT_FILTER_MAXLEN+1;       // Additional safety
     while (ttl-- != 0)
@@ -4054,43 +4060,84 @@ cleanup:
 	return;
 }
 
+static void windivert_classify_release_ale_callout(
+	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
+	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
+	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
+	OUT FWPS_CLASSIFY_OUT0 *result)
+{
+	DEBUG("release ..... ale........ delete the port from the list....");
+	NTSTATUS status;
+	USHORT localport = 0;
+	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
+	//KLOCK_QUEUE_HANDLE lock_handle;
+	//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+	PLIST_ENTRY p;
+	if (!IsListEmpty(&ports_list_head))
+		//做了进程过滤
+	{
+		for (p = ports_list_head.Flink; p != &ports_list_head; )
+			//遍历各个proc_hash值
+		{
+			ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
+			if (localport == elem->localport)
+				//匹配到了对应的端口,删除对应的port;因为这个port 现在开始已经被释放了
+			{
+				DEBUG("delete the old port:%d\n", localport);
+				p->Flink->Blink = p->Blink;
+				p->Blink->Flink = p->Flink;
+				//释放自己
+				PLIST_ENTRY tmp = p->Flink;
+				windivert_free(p);
+				p = tmp;
+			}
+			else
+			{
+				p = p->Flink;
+			}
+		}
+	}
+	//KeReleaseInStackQueuedSpinLock(&lock_handle);
+
+cleanup:
+	result->actionType = FWP_ACTION_CONTINUE;
+	//result->rights |= FWPS_RIGHT_ACTION_WRITE;
+	return;
+}
 static void windivert_classify_closure_ale_callout(
 	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
 	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
 	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
 	OUT FWPS_CLASSIFY_OUT0 *result)
 {
-	DEBUG("closure ..... ale........");
-
+	DEBUG("closure ..... ale........ delete the port from the list....");
 	NTSTATUS status;
-	FWP_BYTE_BLOB * processPath;
-	if (!FWPS_IS_METADATA_FIELD_PRESENT(meta_vals, FWPS_METADATA_FIELD_PROCESS_PATH))
-	{
-		status = STATUS_NOT_FOUND;
-		goto cleanup;
-	}
-
-	processPath = meta_vals->processPath;
-	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
-	/*获取已经保存的proc_hash*/
+	USHORT localport = 0;
+	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
 	//KLOCK_QUEUE_HANDLE lock_handle;
 	//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
 	PLIST_ENTRY p;
-	if (!IsListEmpty(&proc_list_head))
+	if (!IsListEmpty(&ports_list_head))
 		//做了进程过滤
 	{
-		for (p = proc_list_head.Flink; p != &proc_list_head; p = p->Flink)
+		for (p = ports_list_head.Flink; p != &ports_list_head; )
 			//遍历各个proc_hash值
 		{
-			proc_context_t elem = CONTAINING_RECORD(p, proc_context, list_entry);
-			if (proc_hash == elem->proc_hash)
-				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
+			ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
+			if (localport == elem->localport)
+				//匹配到了对应的端口,删除对应的port;因为这个port 现在开始已经被释放了
 			{
-				while (!IsListEmpty(&ports_list_head))
-				{
-					RemoveHeadList(&ports_list_head);
-				}
-				//KeReleaseInStackQueuedSpinLock(&lock_handle);
+				DEBUG("delete the old port:%d\n", localport);
+				p->Flink->Blink = p->Blink;
+				p->Blink->Flink = p->Flink;
+				//释放自己
+				PLIST_ENTRY tmp = p->Flink;
+				windivert_free(p);
+				p = tmp;
+			}
+			else
+			{
+				p = p->Flink;
 			}
 		}
 	}
