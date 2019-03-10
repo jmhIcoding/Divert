@@ -271,6 +271,7 @@ static SC_HANDLE WinDivertDriverInstall(VOID)
     // Check if the WinDivert service already exists; if so, start it.
 WinDivertDriverInstallReTry:
     service = OpenService(manager, WINDIVERT_DEVICE_NAME, SERVICE_ALL_ACCESS);
+	printf("Service Name: %s ", WINDIVERT_DEVICE_NAME);
     if (service != NULL)
     {
         goto WinDivertDriverInstallExit;
@@ -434,7 +435,7 @@ extern  UINT32 WinDivertHelperTransferpath(const char * src_path, int length, ch
 	int i, j;
 	i = j = 0;
 	int err_flag = -1;
-	if (access(src_path, 0) == 0)
+	if (_access(src_path, 0) == 0)
 	{
 		if (src_path[1] == ':')
 		{
