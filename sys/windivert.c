@@ -628,7 +628,7 @@ static VOID windivert_free(PVOID ptr)
     DEBUG("LOAD: loading WinDivert driver");
 
     // Use the "no execute" pool if available:
-	DbgPrint("First::::::Hello.....!");
+	DEBUG("First::::::Hello.....!");
     status = RtlGetVersion(&version);
     if (NT_SUCCESS(status))
     {
@@ -2378,7 +2378,7 @@ static void windivert_classify_outbound_network_v4_callout(
     const FWPS_FILTER0 *filter, IN UINT64 flow_context,
     OUT FWPS_CLASSIFY_OUT0 *result)
 {
-	DbgPrint("call windivert_classify outbound callout...");
+	DEBUG("call windivert_classify outbound callout...");
     windivert_classify_callout((context_t)filter->context,
         WINDIVERT_DIRECTION_OUTBOUND,
         fixed_vals->incomingValue[
@@ -2390,7 +2390,7 @@ static void windivert_classify_outbound_network_v4_callout(
             FWPS_FIELD_OUTBOUND_IPPACKET_V4_FLAGS].value.uint32 &
             FWP_CONDITION_FLAG_IS_LOOPBACK) != 0,
         0, data, flow_context, result);
-	DbgPrint("out of  windivert_classify outbound callout...");
+	DEBUG("out of  windivert_classify outbound callout...");
 }
 
 /*
@@ -2425,7 +2425,7 @@ static void windivert_classify_inbound_network_v4_callout(
     const FWPS_FILTER0 *filter, IN UINT64 flow_context,
     OUT FWPS_CLASSIFY_OUT0 *result)
 {
-	DbgPrint("call windivert_classify inbound callout...");
+	DEBUG("call windivert_classify inbound callout...");
     UINT advance = meta_vals->ipHeaderSize;
     windivert_classify_callout((context_t)filter->context,
         WINDIVERT_DIRECTION_INBOUND,
@@ -3259,7 +3259,7 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 	}
 
 	// Execute the filter:
-
+	KLOCK_QUEUE_HANDLE lock_handle;
 	PLIST_ENTRY p;
 	ports_context_t elem;
 	ip = 0;
@@ -3509,7 +3509,7 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
                         sizeof(WINDIVERT_UDPHDR));
                     break;
 				case WINDIVERT_FILTER_FIELD_ALE_PROCHASH:
-					//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+					KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
 					//这个地方只是在使用 不加锁其实也无妨
 					result = FALSE;
 					if (localport != 0)
@@ -3526,12 +3526,12 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 						if (localport!=0 && localport == elem->localport)
 							//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 						{
-							//KeReleaseInStackQueuedSpinLock(&lock_handle);
+							KeReleaseInStackQueuedSpinLock(&lock_handle);
 							result = TRUE;//匹配成功了
 							goto ___nice__jump;
 						}
 					}
-					//KeReleaseInStackQueuedSpinLock(&lock_handle);
+					KeReleaseInStackQueuedSpinLock(&lock_handle);
 					break;
                 default:
                     field[0] = 0;
@@ -4066,12 +4066,13 @@ static void windivert_classify_release_ale_callout(
 	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
 	OUT FWPS_CLASSIFY_OUT0 *result)
 {
+	goto cleanup;
 	DEBUG("release ..... ale........ delete the port from the list....");
-	NTSTATUS status;
+	NTSTATUS status=0;
 	USHORT localport = 0;
 	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
-	//KLOCK_QUEUE_HANDLE lock_handle;
-	//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+	KLOCK_QUEUE_HANDLE lock_handle;
+	KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
 	PLIST_ENTRY p;
 	if (!IsListEmpty(&ports_list_head))
 		//做了进程过滤
@@ -4083,12 +4084,13 @@ static void windivert_classify_release_ale_callout(
 			if (localport == elem->localport)
 				//匹配到了对应的端口,删除对应的port;因为这个port 现在开始已经被释放了
 			{
-				DEBUG("delete the old port:%d\n", localport);
+				
 				p->Flink->Blink = p->Blink;
 				p->Blink->Flink = p->Flink;
 				//释放自己
 				PLIST_ENTRY tmp = p->Flink;
 				windivert_free(p);
+				status = 1;
 				p = tmp;
 			}
 			else
@@ -4097,7 +4099,11 @@ static void windivert_classify_release_ale_callout(
 			}
 		}
 	}
-	//KeReleaseInStackQueuedSpinLock(&lock_handle);
+	KeReleaseInStackQueuedSpinLock(&lock_handle);
+	if (status == 1)
+	{
+		DEBUG("delete the old port:%d\n", localport);
+	}
 
 cleanup:
 	result->actionType = FWP_ACTION_CONTINUE;
@@ -4111,11 +4117,11 @@ static void windivert_classify_closure_ale_callout(
 	OUT FWPS_CLASSIFY_OUT0 *result)
 {
 	DEBUG("closure ..... ale........ delete the port from the list....");
-	NTSTATUS status;
+	NTSTATUS status=0;
 	USHORT localport = 0;
 	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
-	//KLOCK_QUEUE_HANDLE lock_handle;
-	//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+	KLOCK_QUEUE_HANDLE lock_handle;
+	KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
 	PLIST_ENTRY p;
 	if (!IsListEmpty(&ports_list_head))
 		//做了进程过滤
@@ -4127,12 +4133,13 @@ static void windivert_classify_closure_ale_callout(
 			if (localport == elem->localport)
 				//匹配到了对应的端口,删除对应的port;因为这个port 现在开始已经被释放了
 			{
-				DEBUG("delete the old port:%d\n", localport);
+				
 				p->Flink->Blink = p->Blink;
 				p->Blink->Flink = p->Flink;
 				//释放自己
 				PLIST_ENTRY tmp = p->Flink;
 				windivert_free(p);
+				status = 1;
 				p = tmp;
 			}
 			else
@@ -4141,7 +4148,11 @@ static void windivert_classify_closure_ale_callout(
 			}
 		}
 	}
-	//KeReleaseInStackQueuedSpinLock(&lock_handle);
+	KeReleaseInStackQueuedSpinLock(&lock_handle);
+	if (status == 1)
+	{
+		DEBUG("delete the old port:%d\n", localport);
+	}
 
 cleanup:
 	result->actionType = FWP_ACTION_CONTINUE;
