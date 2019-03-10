@@ -65,6 +65,7 @@ EVT_WDF_WORKITEM windivert_worker;
 #define DEBUG_BUFSIZE       256
 
 #define DEBUG_INFO_ON
+#define DBG
 #ifdef DEBUG_INFO_ON
 static void DEBUG(PCCH format, ...)
 {
@@ -1098,6 +1099,9 @@ windivert_create_exit:
 		 {
 			 layers[i++] = layer_outbound_network_ipv6;
 		 }
+		 /*Add....*/
+		 layers[i++] = layer_assign_ale;
+		 layers[i++] = layer_closure_ale;
 		 break;
 
 	 case WINDIVERT_LAYER_NETWORK_FORWARD:
@@ -1109,17 +1113,15 @@ windivert_create_exit:
 		 {
 			 layers[i++] = layer_forward_network_ipv6;
 		 }
+		 /*Add....*/
+		 layers[i++] = layer_assign_ale;
+		 layers[i++] = layer_closure_ale;
 		 break;
 
 	 default:
 		 return STATUS_INVALID_PARAMETER;
 	 }
-	 /*Add....*/
-		 layers[i++] = layer_assign_ale;
-		 layers[i++] = layer_closure_ale;
-
-
-
+	DEBUG("i is %d ", i);
     for (j = 0; j < i; j++)
     {
         status = windivert_install_callout(context, j, layers[j]);
@@ -1157,6 +1159,7 @@ static NTSTATUS windivert_install_callout(context_t context, UINT idx,
     NTSTATUS status;
 	DEBUG("installing callout. index :%d \n", idx);
     KeAcquireInStackQueuedSpinLock(&context->lock, &lock_handle);
+	
     if (context->state != WINDIVERT_CONTEXT_STATE_OPEN)
     {
         KeReleaseInStackQueuedSpinLock(&lock_handle);
@@ -1184,15 +1187,18 @@ static NTSTATUS windivert_install_callout(context_t context, UINT idx,
     mcallout.applicableLayer         = layer->layer_guid;
     RtlZeroMemory(&filter, sizeof(filter));
     filter.filterKey                 = filter_guid;
+	
     filter.layerKey                  = layer->layer_guid;
     filter.displayData.name          = layer->filter_name;
     filter.displayData.description   = layer->filter_desc;
+	filter.numFilterConditions		 = 0;
     filter.action.type               = FWP_ACTION_CALLOUT_UNKNOWN;
     filter.action.calloutKey         = callout_guid;
     filter.subLayerKey               = layer->sublayer_guid;
     filter.weight.type               = FWP_UINT64;
     filter.weight.uint64             = &weight;
     filter.rawContext                = (UINT64)context;
+	
     status = FwpsCalloutRegister0(WdfDeviceWdmGetDeviceObject(device),
         &scallout, NULL);
     if (!NT_SUCCESS(status))
@@ -2353,6 +2359,7 @@ static void windivert_classify_outbound_network_v4_callout(
             FWPS_FIELD_OUTBOUND_IPPACKET_V4_FLAGS].value.uint32 &
             FWP_CONDITION_FLAG_IS_LOOPBACK) != 0,
         0, data, flow_context, result);
+	DbgPrint("out of  windivert_classify outbound callout...");
 }
 
 /*
@@ -2465,6 +2472,7 @@ static void windivert_classify_callout(context_t context, IN UINT8 direction,
     IN UINT advance, IN OUT void *data, IN UINT64 flow_context,
     OUT FWPS_CLASSIFY_OUT0 *result)
 {
+	DEBUG("Basic checks....%d", 1);
     KLOCK_QUEUE_HANDLE lock_handle;
     FWPS_PACKET_INJECTION_STATE packet_state;
     HANDLE packet_context;
@@ -2479,11 +2487,12 @@ static void windivert_classify_callout(context_t context, IN UINT8 direction,
     NTSTATUS status;
 
     // Basic checks:
+	DEBUG("Basic checks....%d", 2);
     if (!(result->rights & FWPS_RIGHT_ACTION_WRITE) || data == NULL)
     {
         return;
     }
-
+	DEBUG("Well....%d", 4);
     result->actionType = FWP_ACTION_CONTINUE;
     buffers = (PNET_BUFFER_LIST)data;
     buffer = NET_BUFFER_LIST_FIRST_NB(buffers);
@@ -2537,7 +2546,7 @@ static void windivert_classify_callout(context_t context, IN UINT8 direction,
         // loops, we mark this packet as an "impostor".
         impostor = TRUE;
     }
-
+	DEBUG("well %d\n", 5);
     // Loopback packets are considered outbound only.
     if (loopback && direction == WINDIVERT_DIRECTION_INBOUND)
     {
@@ -2572,6 +2581,7 @@ static void windivert_classify_callout(context_t context, IN UINT8 direction,
      */
 
     // Find the first NET_BUFFER we need to queue:
+	DEBUG("begin net_buffer...%d",6);
     buffer_fst = buffer;
     outbound = (direction == WINDIVERT_DIRECTION_OUTBOUND);
     do
@@ -2585,7 +2595,7 @@ static void windivert_classify_callout(context_t context, IN UINT8 direction,
         buffer_fst = NET_BUFFER_NEXT_NB(buffer_fst);
     }
     while (buffer_fst != NULL);
-
+	DEBUG("well %d\n", 7);
     // If no packet matches the filter, CONTINUE the entire NET_BUFFER_LIST.
     if (buffer_fst == NULL)
     {
@@ -2632,6 +2642,7 @@ static void windivert_classify_callout(context_t context, IN UINT8 direction,
     }
 
     // STEP (3): Queue all remaining packets:
+	DEBUG("well %d\n",8);
     buffer_itr = NET_BUFFER_NEXT_NB(buffer_fst);
     while (buffer_itr != NULL)
     {
@@ -3219,30 +3230,33 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 	// Execute the filter:
 	//ip = 0; -->原来的代码
 	/*Add 把proc都加到第0项去 ,其他匹配过程照常 --->控制第0 条为进程哈希的匹配专用 */
-	KIRQL irql33;
-	//KeAcquireSpinLock(&ports_list_lock, &irql33);
 	PLIST_ENTRY p;
 	ports_context_t elem;
-	for (p = ports_list_head.Flink; p != &ports_list_head; p = p->Flink)
-		//遍历各个源端口的值,看在不在里面
-	{
-		ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
-		DEBUG("scan port:%d==%d", localport, elem->localport);
-		if (localport == elem->localport)
+	//DEBUG("begin scan port:");
+	//DEBUG("TEST fitler from rule 0 process port");
+	//KLOCK_QUEUE_HANDLE lock_handle;
+	//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+	//for (p = ports_list_head.Flink;p != &ports_list_head; p = p->Flink)
+		//遍历各个源端口的值,看在不在面
+	//{
+	//	ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
+		//DEBUG("scan port:%d==%d", localport, elem->localport);
+	//	if (localport == elem->localport)
 			//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
-		{
-			//KeReleaseSpinLock(&ports_list_lock, &irql33);
-			return TRUE;
-		}
-	}
-	if (IsListEmpty(&ports_list_head))
-	{
-		DEBUG("scan port not pass.");
-		return FALSE;
-	}
-	//KeReleaseSpinLock(&ports_list_lock, &irql33);
-
-	ip = 1;
+	//	{
+			//KeReleaseInStackQueuedSpinLock(&lock_handle);
+	//		return TRUE;
+	//	}
+	//}
+	//if (!IsListEmpty(&ports_list_head))
+	//{
+		//DEBUG("scan port not pass.");
+		//KeReleaseInStackQueuedSpinLock(&lock_handle);
+	//	return FALSE;
+	//}
+	//KeReleaseInStackQueuedSpinLock(&lock_handle);
+	//DEBUG("TEST fitler from rule 1");
+	ip = 0;
     ttl = WINDIVERT_FILTER_MAXLEN+1;       // Additional safety
     while (ttl-- != 0)
     {
@@ -3275,6 +3289,9 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
             case WINDIVERT_FILTER_PROTOCOL_UDP:
                 result = (udp_header != NULL);
                 break;
+			case WINDIVERT_FILTER_PROTOCOL_ALE:
+				result = !IsListEmpty(&ports_list_head);//如果非空的话就查看一下,说明目标进程已经产生了流量
+				break;
             default:
                 result = FALSE;
                 break;
@@ -3486,20 +3503,29 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
                         sizeof(WINDIVERT_UDPHDR));
                     break;
 				case WINDIVERT_FILTER_FIELD_ALE_PROCHASH:
+					//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+					//这个地方只是在使用 不加锁其实也无妨
+					result = FALSE;
+					if (localport != 0)
+					{
+						localport = ((*(unsigned char*)&localport) << 8) + *(1 + (unsigned char*)&localport);//网络字节序与主机字节序之间的转换,这里应该使用通用的函数
+					}
 					for (p = ports_list_head.Flink; p != &ports_list_head; p = p->Flink)
 						//遍历各个源端口的值,看在不在里面
 					{
 						
 						elem = CONTAINING_RECORD(p, ports_context, list_entry);
-						DEBUG("scan for the proper port:%d ==%d ", localport, elem->localport);
-						result = FALSE;
+						//DEBUG("scan for the proper port:%d ==%d ", localport, elem->localport);
+						
 						if (localport!=0 && localport == elem->localport)
 							//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 						{
+							//KeReleaseInStackQueuedSpinLock(&lock_handle);
 							result = TRUE;//匹配成功了
 							goto ___nice__jump;
 						}
 					}
+					//KeReleaseInStackQueuedSpinLock(&lock_handle);
 					break;
                 default:
                     field[0] = 0;
@@ -3850,17 +3876,19 @@ static filter_t windivert_filter_compile(windivert_ioctl_filter_t ioctl_filter,
 			if (filter0[i].arg[0] != 0)
 				//这个0 就是初始值,说明没有设置进程过滤
 			{
-				proc_context_t proc = (proc_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(proc_context), WINDIVERT_TAG);
+				
+				proc_context_t proc = (proc_context_t)ExAllocatePoolWithTag(non_paged_pool, sizeof(proc_context), WINDIVERT_TAG);
 				proc->proc_hash = filter0[i].arg[0];//复用了
-				KIRQL irql;
-				//KeAcquireSpinLock(&proc_list_lock, &irql);
+				KLOCK_QUEUE_HANDLE lock_handle;
+				KeAcquireInStackQueuedSpinLock(&proc_list_lock, &lock_handle);
 				if (IsListEmpty(&proc_list_head))
 					//只能插入一个进程列表
 				{
 					InsertHeadList(&proc_list_head, &proc->list_entry);
 				}
+				KeReleaseInStackQueuedSpinLock(&lock_handle);
 				DEBUG("WINDIVERT::: ProcHash :%d...", proc->proc_hash);
-				//KeReleaseSpinLock(&proc_list_lock, &irql);
+				
 			}
 		}
 
@@ -3993,8 +4021,8 @@ static void windivert_classify_assign_ale_callout(
 	processPath = meta_vals->processPath;
 	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
 	/*获取已经保存的proc_hash*/
-	KIRQL irql;
-	//KeAcquireSpinLock(&proc_list_lock, &irql);
+	KLOCK_QUEUE_HANDLE lock_handle;
+	//KeAcquireInStackQueuedSpinLock(&proc_list_lock, &lock_handle);
 	PLIST_ENTRY p;
 	if (!IsListEmpty(&proc_list_head))
 		//做了进程过滤
@@ -4003,10 +4031,10 @@ static void windivert_classify_assign_ale_callout(
 			//遍历各个proc_hash值,其实就一个proc_hash
 		{
 			proc_context_t elem = CONTAINING_RECORD(p, proc_context, list_entry);
-			UINT8 *data = ExAllocatePoolWithTag(PagedPool, sizeof(UINT8)* processPath->size, WINDIVERT_TAG);
-			memcpy(data, processPath->data, processPath->size);
-			DEBUG("Hello,Now the process path is %S.  size:%d ", data,processPath->size);
-			ExFreePoolWithTag(data, WINDIVERT_TAG);
+			//UINT8 *data = ExAllocatePoolWithTag(PagedPool, sizeof(UINT8)* processPath->size, WINDIVERT_TAG);
+			//memcpy(data, processPath->data, processPath->size);
+			DEBUG("Hello,Now the process path is %S.  size:%d ", processPath->data,processPath->size);
+			//ExFreePoolWithTag(data, WINDIVERT_TAG);
 			DEBUG("Hello,,,,Now... cmp the proc hash.%d(new) == %d(old) ???", proc_hash, elem->proc_hash);
 			if (proc_hash == elem->proc_hash)
 				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
@@ -4019,8 +4047,9 @@ static void windivert_classify_assign_ale_callout(
 			}
 		}
 	}
-	//KeReleaseSpinLock(&proc_list_lock, &irql);
-
+	//KeReleaseInStackQueuedSpinLock(&lock_handle);
+	result->actionType = FWP_ACTION_CONTINUE;
+	//result->rights |= FWPS_RIGHT_ACTION_WRITE;
 cleanup:
 	return;
 }
@@ -4032,6 +4061,7 @@ static void windivert_classify_closure_ale_callout(
 	OUT FWPS_CLASSIFY_OUT0 *result)
 {
 	DEBUG("closure ..... ale........");
+
 	NTSTATUS status;
 	FWP_BYTE_BLOB * processPath;
 	if (!FWPS_IS_METADATA_FIELD_PRESENT(meta_vals, FWPS_METADATA_FIELD_PROCESS_PATH))
@@ -4043,8 +4073,8 @@ static void windivert_classify_closure_ale_callout(
 	processPath = meta_vals->processPath;
 	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
 	/*获取已经保存的proc_hash*/
-	KIRQL irql;
-	//KeAcquireSpinLock(&proc_list_lock, &irql);
+	//KLOCK_QUEUE_HANDLE lock_handle;
+	//KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
 	PLIST_ENTRY p;
 	if (!IsListEmpty(&proc_list_head))
 		//做了进程过滤
@@ -4056,18 +4086,18 @@ static void windivert_classify_closure_ale_callout(
 			if (proc_hash == elem->proc_hash)
 				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 			{
-				KIRQL irql2;
-				//KeAcquireSpinLock(&ports_list_lock, &irql2);
 				while (!IsListEmpty(&ports_list_head))
 				{
 					RemoveHeadList(&ports_list_head);
 				}
-				//KeReleaseSpinLock(&ports_list_lock, &irql2);
+				//KeReleaseInStackQueuedSpinLock(&lock_handle);
 			}
 		}
 	}
-	//KeReleaseSpinLock(&proc_list_lock, &irql);
+	//KeReleaseInStackQueuedSpinLock(&lock_handle);
 
 cleanup:
+	result->actionType = FWP_ACTION_CONTINUE;
+	//result->rights |= FWPS_RIGHT_ACTION_WRITE;
 	return;
 } 
