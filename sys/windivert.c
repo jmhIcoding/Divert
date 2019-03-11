@@ -390,6 +390,9 @@ static void windivert_classify_release_ale_callout(
 	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
 	OUT FWPS_CLASSIFY_OUT0 *result);
 
+static NTSTATUS windivert_delete_port_from_ports_list(USHORT localport);
+static NTSTATUS windivert_scan_port_from_ports_list(USHORT localport);
+
 
 static void windivert_classify_callout(context_t context, IN UINT8 direction,
     IN UINT32 if_idx, IN UINT32 sub_if_idx, IN BOOL is_ipv4,
@@ -1401,7 +1404,7 @@ unregister_callouts:
     UINT priority;
     NTSTATUS status;
     
-    DEBUG("CLEANUP: cleaning up WinDivert context (context=%p)", context);
+    DEBUG("CLEANUP: cleaning up WinDivert context (context=%p),and proc ,ports context.", context);
 
     timestamp = KeQueryPerformanceCounter(NULL).QuadPart;
     KeAcquireInStackQueuedSpinLock(&context->lock, &lock_handle);
@@ -1479,6 +1482,26 @@ windivert_cleanup_error:
         WdfObjectDelete(worker);
     }
     windivert_uninstall_callouts(context, WINDIVERT_CONTEXT_STATE_CLOSING);
+	/*
+	* Add....同时,把所有的ports_list_head,proc_list_head都清空
+	*/
+	PLIST_ENTRY elem;
+	KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+	while (!IsListEmpty(&ports_list_head))
+	{
+		elem= CONTAINING_RECORD(RemoveTailList(&ports_list_head),ports_context,list_entry);
+		windivert_free(elem);
+	}
+	KeReleaseInStackQueuedSpinLock(&lock_handle);
+
+	KeAcquireInStackQueuedSpinLock(&proc_list_lock,&lock_handle);
+	while (!IsListEmpty(&proc_list_head))
+	{
+		elem=CONTAINING_RECORD( RemoveTailList(&proc_list_head),proc_context,list_entry);
+		windivert_free(elem);
+	}
+	KeReleaseInStackQueuedSpinLock(&lock_handle);
+
     FwpmEngineClose0(context->engine_handle);
 }
 
@@ -4016,6 +4039,11 @@ static void windivert_classify_assign_ale_callout(
 	OUT FWPS_CLASSIFY_OUT0 *result)
 {
 	DEBUG("assign ..... ale........");
+	/*
+	* 本接口在操作系统为进程分配tcp/udp socket资源的时候会被调用
+	* 本接口的任务： 1. 添加特定进程的新的端口号		
+	*				 2. 删除特定进程的旧端口号. 例如 对于端口号 3000,一开始被分配给指定的进程 A。后面又分配给了进程B。说明3000应该从进程A的端口列表里面删除掉了。
+	*/
 	NTSTATUS status;
 	FWP_BYTE_BLOB * processPath;
 	if (!FWPS_IS_METADATA_FIELD_PRESENT(meta_vals, FWPS_METADATA_FIELD_PROCESS_PATH))
@@ -4028,7 +4056,7 @@ static void windivert_classify_assign_ale_callout(
 	UINT32 proc_hash = windivert_hash(processPath->data, processPath->size);
 	/*获取已经保存的proc_hash*/
 	KLOCK_QUEUE_HANDLE lock_handle;
-	//KeAcquireInStackQueuedSpinLock(&proc_list_lock, &lock_handle);
+	KeAcquireInStackQueuedSpinLock(&proc_list_lock, &lock_handle);
 	PLIST_ENTRY p;
 	if (!IsListEmpty(&proc_list_head))
 		//做了进程过滤
@@ -4037,44 +4065,49 @@ static void windivert_classify_assign_ale_callout(
 			//遍历各个proc_hash值,其实就一个proc_hash
 		{
 			proc_context_t elem = CONTAINING_RECORD(p, proc_context, list_entry);
-			//UINT8 *data = ExAllocatePoolWithTag(PagedPool, sizeof(UINT8)* processPath->size, WINDIVERT_TAG);
-			//memcpy(data, processPath->data, processPath->size);
 			DEBUG("Hello,Now the process path is %S.  size:%d ", processPath->data,processPath->size);
-			//ExFreePoolWithTag(data, WINDIVERT_TAG);
-			DEBUG("Hello,,,,Now... cmp the proc hash.%d(new) == %d(old) ???", proc_hash, elem->proc_hash);
+			DEBUG("Hello,,,,Now... cmp the proc hash.%d(test) == %d(wanted) ???", proc_hash, elem->proc_hash);
 			if (proc_hash == elem->proc_hash)
 				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 			{
 				USHORT localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_ASSIGNMENT_V4_IP_LOCAL_PORT].value.int16;
-				ports_context_t port = (ports_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(ports_context), WINDIVERT_TAG);
-				port->localport = localport;
-				ExInterlockedInsertTailList(&ports_list_head, &port->list_entry, &ports_list_lock);//把端口插入到链表里面去
-				DEBUG("Hello,,Now ,insert new port:%d...", port->localport);
+				if (windivert_scan_port_from_ports_list(localport) == 0)
+					//说明不存在对应的端口
+				{
+					ports_context_t port = (ports_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(ports_context), WINDIVERT_TAG);
+					port->localport = localport;
+					ExInterlockedInsertTailList(&ports_list_head, &port->list_entry, &ports_list_lock);//把端口插入到链表里面去
+					DEBUG("Hello,,Now ,insert new port:%d...", port->localport);
+				}
+				else
+					//说明已经存在了对应的端口
+				{
+					DEBUG("Hello,,Now ,port:%d... already exist;", localport);
+				}
+			}
+			else
+				//说明当前进程 不是我们感兴趣的进程;那么看它获得的端口号是否被复用,然后把端口删除掉
+			{
+				USHORT localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_ASSIGNMENT_V4_IP_LOCAL_PORT].value.int16;
+				windivert_delete_port_from_ports_list(localport);
 			}
 		}
 	}
-	//KeReleaseInStackQueuedSpinLock(&lock_handle);
+	KeReleaseInStackQueuedSpinLock(&lock_handle);
 	result->actionType = FWP_ACTION_CONTINUE;
 	//result->rights |= FWPS_RIGHT_ACTION_WRITE;
 cleanup:
 	return;
 }
-
-static void windivert_classify_release_ale_callout(
-	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
-	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
-	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
-	OUT FWPS_CLASSIFY_OUT0 *result)
+static NTSTATUS windivert_scan_port_from_ports_list(USHORT localport)
+//return : 0: 列表不存在
+//		   1: 列表存在
 {
-	goto cleanup;
-	DEBUG("release ..... ale........ delete the port from the list....");
-	NTSTATUS status=0;
-	USHORT localport = 0;
-	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
+	NTSTATUS status = 0;
 	KLOCK_QUEUE_HANDLE lock_handle;
 	KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
 	PLIST_ENTRY p;
-	if (!IsListEmpty(&ports_list_head))
+	if (localport != 0 && !IsListEmpty(&ports_list_head))
 		//做了进程过滤
 	{
 		for (p = ports_list_head.Flink; p != &ports_list_head; )
@@ -4082,16 +4115,10 @@ static void windivert_classify_release_ale_callout(
 		{
 			ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
 			if (localport == elem->localport)
-				//匹配到了对应的端口,删除对应的port;因为这个port 现在开始已经被释放了
+				//匹配到了对应的端口
 			{
-				
-				p->Flink->Blink = p->Blink;
-				p->Blink->Flink = p->Flink;
-				//释放自己
-				PLIST_ENTRY tmp = p->Flink;
-				windivert_free(p);
 				status = 1;
-				p = tmp;
+				break;
 			}
 			else
 			{
@@ -4104,6 +4131,63 @@ static void windivert_classify_release_ale_callout(
 	{
 		DEBUG("delete the old port:%d\n", localport);
 	}
+	return status;
+}
+static NTSTATUS windivert_delete_port_from_ports_list(USHORT localport)
+//从ports list 里面删除特定的端口;
+//return : 0 :删除失败,说明 ports_list没有目标端口
+//		   1 :删除成功
+{
+	NTSTATUS status=0;
+	KLOCK_QUEUE_HANDLE lock_handle;
+	KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
+	PLIST_ENTRY p;
+	if (localport !=0 && !IsListEmpty(&ports_list_head))
+		//做了进程过滤
+	{
+		for (p = ports_list_head.Flink; p != &ports_list_head; )
+			//遍历各个proc_hash值
+		{
+			ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
+			if (localport == elem->localport)
+				//匹配到了对应的端口,删除对应的port;因为这个port 现在开始已经被释放了
+			{
+
+				p->Flink->Blink = p->Blink;
+				p->Blink->Flink = p->Flink;
+				//释放自己
+				PLIST_ENTRY tmp = p->Flink;
+				windivert_free(p);
+				status = 1;
+				p = tmp;
+				break;//因为插入的时候遵循 不会插入相同的端口,因此一旦找到就可以直接释放,无需再遍历
+			}
+			else
+			{
+				p = p->Flink;
+			}
+		}
+	}
+	KeReleaseInStackQueuedSpinLock(&lock_handle);
+	if (status == 1)
+	{
+		DEBUG("delete the old port:%d\n", localport);
+	}
+	return status;
+}
+static void windivert_classify_release_ale_callout(
+	IN const FWPS_INCOMING_VALUES0 *fixed_vals,
+	IN const FWPS_INCOMING_METADATA_VALUES0 *meta_vals, IN OUT void *data,
+	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
+	OUT FWPS_CLASSIFY_OUT0 *result)
+{
+	goto cleanup;
+	/*目前先让release失效,因为在udp 资源很快会被释放,来不及获取数据*/
+	DEBUG("release ..... ale........ delete the port from the list....");
+	NTSTATUS status=0;
+	USHORT localport = 0;
+	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
+	windivert_delete_port_from_ports_list(localport);
 
 cleanup:
 	result->actionType = FWP_ACTION_CONTINUE;
@@ -4120,39 +4204,7 @@ static void windivert_classify_closure_ale_callout(
 	NTSTATUS status=0;
 	USHORT localport = 0;
 	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
-	KLOCK_QUEUE_HANDLE lock_handle;
-	KeAcquireInStackQueuedSpinLock(&ports_list_lock, &lock_handle);
-	PLIST_ENTRY p;
-	if (!IsListEmpty(&ports_list_head))
-		//做了进程过滤
-	{
-		for (p = ports_list_head.Flink; p != &ports_list_head; )
-			//遍历各个proc_hash值
-		{
-			ports_context_t elem = CONTAINING_RECORD(p, ports_context, list_entry);
-			if (localport == elem->localport)
-				//匹配到了对应的端口,删除对应的port;因为这个port 现在开始已经被释放了
-			{
-				
-				p->Flink->Blink = p->Blink;
-				p->Blink->Flink = p->Flink;
-				//释放自己
-				PLIST_ENTRY tmp = p->Flink;
-				windivert_free(p);
-				status = 1;
-				p = tmp;
-			}
-			else
-			{
-				p = p->Flink;
-			}
-		}
-	}
-	KeReleaseInStackQueuedSpinLock(&lock_handle);
-	if (status == 1)
-	{
-		DEBUG("delete the old port:%d\n", localport);
-	}
+	windivert_delete_port_from_ports_list(localport);
 
 cleanup:
 	result->actionType = FWP_ACTION_CONTINUE;
