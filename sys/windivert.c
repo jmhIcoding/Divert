@@ -64,8 +64,8 @@ EVT_WDF_WORKITEM windivert_worker;
 //#define DEBUG_ON
 #define DEBUG_BUFSIZE       256
 
-#define DEBUG_INFO_ON
-#define DBG
+//#define DEBUG_INFO_ON
+//#define DBG
 #ifdef DEBUG_INFO_ON
 static void DEBUG(PCCH format, ...)
 {

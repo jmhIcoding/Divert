@@ -126,6 +126,7 @@
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
     <IncludePath>C:\Users\jmh081701\Documents\Divert\include;$(IncludePath)</IncludePath>
     <LibraryPath>E:\Program Files (x86)\vs2017\VC\Tools\MSVC\14.16.27023\lib\x86;$(LibraryPath)</LibraryPath>
+    <EnableInf2cat>false</EnableInf2cat>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
@@ -136,6 +137,7 @@
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
     <IncludePath>C:\Users\jmh081701\Documents\Divert\include;$(IncludePath)</IncludePath>
     <LibraryPath>E:\Program Files (x86)\vs2017\VC\Tools\MSVC\14.16.27023\lib\x64;$(LibraryPath)</LibraryPath>
+    <EnableInf2cat>false</EnableInf2cat>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
