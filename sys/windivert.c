@@ -179,7 +179,7 @@ typedef struct context_s *context_t;
 typedef struct _ports_context_
 {
 	LIST_ENTRY list_entry;
-	USHORT localport;
+	UINT32 localport;
 } ports_context,*ports_context_t;
 
 
@@ -390,8 +390,8 @@ static void windivert_classify_release_ale_callout(
 	const FWPS_FILTER0 *filter, IN UINT64 flow_context,
 	OUT FWPS_CLASSIFY_OUT0 *result);
 
-static NTSTATUS windivert_delete_port_from_ports_list(USHORT localport);
-static NTSTATUS windivert_scan_port_from_ports_list(USHORT localport);
+static NTSTATUS windivert_delete_port_from_ports_list(UINT32 localport);
+static NTSTATUS windivert_scan_port_from_ports_list(UINT32 localport);
 
 
 static void windivert_classify_callout(context_t context, IN UINT8 direction,
@@ -3139,7 +3139,7 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 	UINT16 ip, ttl;
 	UINT8 proto;
 	NTSTATUS status;
-	USHORT localport = 0;
+	UINT32 localport = 0;
 	// Parse the headers:
 	tot_len = NET_BUFFER_DATA_LENGTH(buffer);
 	if (tot_len < sizeof(WINDIVERT_IPHDR))
@@ -3538,6 +3538,7 @@ static BOOL windivert_filter(PNET_BUFFER buffer, UINT32 if_idx,
 					if (localport != 0)
 					{
 						localport = ((*(unsigned char*)&localport) << 8) + *(1 + (unsigned char*)&localport);//网络字节序与主机字节序之间的转换,这里应该使用通用的函数
+						localport = localport + (ip_header->Protocol << 16); //加上协议类型
 					}
 					for (p = ports_list_head.Flink; p != &ports_list_head; p = p->Flink)
 						//遍历各个源端口的值,看在不在里面
@@ -4067,17 +4068,19 @@ static void windivert_classify_assign_ale_callout(
 			proc_context_t elem = CONTAINING_RECORD(p, proc_context, list_entry);
 			DEBUG("Hello,Now the process path is %S.  size:%d ", processPath->data,processPath->size);
 			DEBUG("Hello,,,,Now... cmp the proc hash.%d(test) == %d(wanted) ???", proc_hash, elem->proc_hash);
+			USHORT localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_ASSIGNMENT_V4_IP_LOCAL_PORT].value.int16;
+			UCHAR protocal = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_ASSIGNMENT_V4_IP_PROTOCOL].value.int8;
 			if (proc_hash == elem->proc_hash)
 				//匹配到了对应的进程,提取这个流对应的local port ,把它添加到其它的地方去
 			{
-				USHORT localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_ASSIGNMENT_V4_IP_LOCAL_PORT].value.int16;
+
 				if (windivert_scan_port_from_ports_list(localport) == 0)
 					//说明不存在对应的端口
 				{
 					ports_context_t port = (ports_context_t)ExAllocatePoolWithTag(PagedPool, sizeof(ports_context), WINDIVERT_TAG);
-					port->localport = localport;
+					port->localport = localport+ (protocal << 16);//高16位是协议类型,低16位是端口号
 					ExInterlockedInsertTailList(&ports_list_head, &port->list_entry, &ports_list_lock);//把端口插入到链表里面去
-					DEBUG("Hello,,Now ,insert new port:%d...", port->localport);
+					DEBUG("Hello,,Now ,insert new port:%d...,protocol:0x%x; the inserted is :0x%x", localport,protocal,port->localport);
 				}
 				else
 					//说明已经存在了对应的端口
@@ -4088,8 +4091,7 @@ static void windivert_classify_assign_ale_callout(
 			else
 				//说明当前进程 不是我们感兴趣的进程;那么看它获得的端口号是否被复用,然后把端口删除掉
 			{
-				USHORT localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_ASSIGNMENT_V4_IP_LOCAL_PORT].value.int16;
-				windivert_delete_port_from_ports_list(localport);
+				windivert_delete_port_from_ports_list(localport + (protocal << 16));
 			}
 		}
 	}
@@ -4099,7 +4101,7 @@ static void windivert_classify_assign_ale_callout(
 cleanup:
 	return;
 }
-static NTSTATUS windivert_scan_port_from_ports_list(USHORT localport)
+static NTSTATUS windivert_scan_port_from_ports_list(UINT32 localport)
 //return : 0: 列表不存在
 //		   1: 列表存在
 {
@@ -4133,7 +4135,7 @@ static NTSTATUS windivert_scan_port_from_ports_list(USHORT localport)
 	}
 	return status;
 }
-static NTSTATUS windivert_delete_port_from_ports_list(USHORT localport)
+static NTSTATUS windivert_delete_port_from_ports_list(UINT32 localport)
 //从ports list 里面删除特定的端口;
 //return : 0 :删除失败,说明 ports_list没有目标端口
 //		   1 :删除成功
@@ -4185,7 +4187,7 @@ static void windivert_classify_release_ale_callout(
 	/*目前先让release失效,因为在udp 资源很快会被释放,来不及获取数据*/
 	DEBUG("release ..... ale........ delete the port from the list....");
 	NTSTATUS status=0;
-	USHORT localport = 0;
+	UINT32 localport = 0;
 	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
 	windivert_delete_port_from_ports_list(localport);
 
@@ -4202,7 +4204,7 @@ static void windivert_classify_closure_ale_callout(
 {
 	DEBUG("closure ..... ale........ delete the port from the list....");
 	NTSTATUS status=0;
-	USHORT localport = 0;
+	UINT32 localport = 0;
 	localport = fixed_vals->incomingValue[FWPS_FIELD_ALE_RESOURCE_RELEASE_V4_IP_LOCAL_PORT].value.int16;
 	windivert_delete_port_from_ports_list(localport);
 
